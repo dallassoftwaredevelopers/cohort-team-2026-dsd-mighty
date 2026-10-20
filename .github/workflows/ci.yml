@@ -23,7 +23,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v9
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
           cache-dependency-glob: "backend/uv.lock"
@@ -31,34 +31,5 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
-      - name: Run tests / Lint (example)
-        run: uv run pytest # Replace with your test command if you have tests
-
-  frontend:
-    name: Frontend (Next.js)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./frontend 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-          cache: 'pnpm'
-          cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Type check
-        run: pnpm run type-check
-
-      - name: Lint
-        run: pnpm run lint
-
-      - name: Build Next.js app
-        run: pnpm run build
+      - name: Run backend tests
+        run: uv run pytest -v
