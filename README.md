@@ -15,6 +15,7 @@ The project will start with traditional software engineering approaches, with AI
 - 📦 [**uv**](https://docs.astral.sh/uv/) for Python dependency management and locking.
 - ✅ [**pytest**](https://docs.pytest.org/) for automated backend tests.
 - 🔄 [**GitHub Actions**](https://docs.github.com/en/actions) for continuous integration.
+- 📦 [**pnpm**](https://pnpm.io/) for planned frontend dependency management.
 - 🖥️ **Frontend:** Not yet implemented.
 
 ## Meet the Team
@@ -30,7 +31,7 @@ Built collaboratively by members of the Dallas Software Developers 2026 cohort.
 | **Member Name** | [GitHub](https://github.com/) | — | — |
 
 
-## Project Structure
+## Project Structure (To be updated)
 
 ```text
 cohort-team-2026-dsd-mighty/
@@ -74,8 +75,22 @@ Once the server is running:
 From the `backend/` directory:
 
 ```bash
-uv run pytest
+uv --version
+uv sync --locked
+uv run pytest -v
 ```
+
+- `uv --version` confirms uv is installed.
+- `uv sync --locked` installs dependencies and checks that `uv.lock` matches the project configuration.
+- `uv run pytest -v` runs backend tests with detailed results.
+
+**GitHub Actions workflow validation (optional):** Install [actionlint](https://github.com/rhysd/actionlint) using a prebuilt executable or a package manager. Go is not required when using the executable. From the **repository root**, run:
+
+```bash
+actionlint .github/workflows/ci.yml
+```
+
+No output and an exit code of `0` normally mean actionlint found no errors.
 
 ## Frontend Development
 
@@ -83,7 +98,9 @@ The frontend has not been initialized yet. Setup instructions will be added when
 
 ## Continuous Integration
 
-GitHub Actions configuration lives in [`.github/workflows/`](./.github/workflows/). The backend workflow is intended to install dependencies and run automated checks on changes to the repository.
+GitHub Actions configuration lives in [`.github/workflows/`](./.github/workflows/). It runs on pull requests to `main` and pushes to `main`.
+
+- **Backend:** Set up Python and uv, install locked dependencies, and run pytest. The backend checks have passed locally; the GitHub Actions workflow is still being validated.
 
 ## Project Status
 
