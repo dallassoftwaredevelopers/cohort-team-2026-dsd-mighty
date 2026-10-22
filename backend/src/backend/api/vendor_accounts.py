@@ -16,7 +16,6 @@ router = APIRouter(
     tags=["vendor accounts"],
 )
 
-# Temporary storage for local development only.
 vendor_accounts: dict[UUID, VendorAccountRead] = {}
 
 
@@ -65,8 +64,7 @@ def list_vendor_accounts(
     status_code=status.HTTP_201_CREATED,
 )
 def create_vendor_account(account: VendorAccountCreate):
-    # Prototype duplicate check.
-    # A database constraint should enforce this in production.
+  
     for existing in vendor_accounts.values():
         if (
             existing.property_id == account.property_id

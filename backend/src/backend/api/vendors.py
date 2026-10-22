@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from uuid import UUID, uuid64
+from uuid import UUID, uuid4
 from fastapi import APIRouter, HTTPException, status, Query
 from backend.schemas.vendor import VendorCreate, VendorRead, VendorUpdate
 

@@ -3,6 +3,7 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+from backend.schemas.common import ActiveStatus, PaymentMethod
 
 
 class VendorAccountCreate(BaseModel):
@@ -13,7 +14,7 @@ class VendorAccountCreate(BaseModel):
     vendor_id: UUID
     account_number: str = Field(min_length=1, max_length=100)
     account_type: str = Field(min_length=1)
-    payment_method: str = Field(min_length=1)
+    payment_method: PaymentMethod
     portal_url: str | None = None
     status: str = "active"
 
@@ -28,9 +29,9 @@ class VendorAccountUpdate(BaseModel):
         default=None, min_length=1, max_length=100
     )
     account_type: str | None = Field(default=None, min_length=1)
-    payment_method: str | None = Field(default=None, min_length=1)
+    payment_method: PaymentMethod | None = Field(default=None, min_length=1)
     portal_url: str | None = None
-    status: str | None = None
+    status: ActiveStatus | None = None
 
 
 class VendorAccountRead(BaseModel):
@@ -42,9 +43,9 @@ class VendorAccountRead(BaseModel):
     vendor_id: UUID
     account_number: str
     account_type: str
-    payment_method: str
+    payment_method: PaymentMethod
     portal_url: str | None = None
-    status: str
+    status: ActiveStatus
     created_at: datetime
 
 
