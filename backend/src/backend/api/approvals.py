@@ -2,29 +2,25 @@ from typing import Literal
 from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
+from backend.schemas.approval import ApprovalDecision, ApprovalRead, ApprovalStatus, ApprovalDecisionType
 
 router = APIRouter(
     prefix="/approvals",
     tags=["approvals"],
 )
 
-class ApprovalDecision(BaseModel):
-    decision: Literal["approve", "reject"]
-    comments: str | None = None
-
-@router.get("")
+@router.get("", response_model=list[ApprovalRead])
 def list_approvals(
-    status: Literal["pending", "approved", "rejected"] ="pending",
-    limit: int = Query(10, gt=0, le=100),
-    skip: int = Query(0, ge=0)
-):
-    return {
-        "items": [],
-        "total": 0,
-        "skip": skip,
-        "limit": limit,
-        "status_filter": status,
-    }
+    status_filter: ApprovalStatus = Query(default=ApprovalStatus.pending, alias="status"),
+    bill_id: UUID | None = None,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=25, ge=1, le=100),
+) -> list[ApprovalRead]:
+    items = [a for a in _approvals if a.status == status_filter]
+    if bill_id is not None:
+        items = [a for a in items if a.bill_id == bill_id]
+    items.sort(key=lambda a: a.requested_at)
+    return items[skip : skip + limit]
 
 
 @router.post("/{approval_id}/decision")

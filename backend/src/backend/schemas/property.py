@@ -11,22 +11,21 @@ class Address(BaseModel):
     state: str = Field(min_length=2, max_length=2)
     zip_code: str = Field(pattern=r"^\d{5}(-\d{4})?$")
 
+class PropertyBase(BaseModel):
+    property_name: str = Field(min_length=1, max_length=200)
+    address: Address
+    status: ActiveStatus
 
-class PropertyCreate(BaseModel):
+
+class PropertyCreate(PropertyBase):
     model_config = ConfigDict(extra="forbid")
 
-    property_name: str
-    address: Address | None = None
-    status: ActiveStatus | None = None
 
-class PropertyRead(PropertyCreate):
+class PropertyRead(PropertyBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    property_name: str
-    address: Address | None = None
-    status: ActiveStatus | None = None
-
+  
 class PropertyUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")

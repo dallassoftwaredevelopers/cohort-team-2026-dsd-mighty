@@ -1,7 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime, UTC
+from http.client import HTTPException
 from uuid import UUID, uuid4
 from fastapi import APIRouter, status
-from backend.schemas.bill import BillCreate, BillRead
+from backend.schemas.bill import BillCreate, BillRead, BillStatus
 
 router = APIRouter(
     prefix="/bills",
@@ -15,8 +16,9 @@ def create_bill(bill: BillCreate) -> BillRead:
     new_bill = BillRead(
         **bill.model_dump(),
         id=uuid4(),
-        status="draft",
-        created_at=datetime.now(timezone.utc),
+        #add in submitted_by which user
+        status=BillStatus.draft,
+        created_at=datetime.now(UTC),
     )
 
     _bills.append(new_bill)
@@ -25,3 +27,13 @@ def create_bill(bill: BillCreate) -> BillRead:
 @router.get("", response_model=list[BillRead])
 def list_bills() -> list[BillRead]:
     return _bills
+
+@router.get("/{bill_id}", response_model=BillRead)
+def get_bill(bill_id: UUID) -> BillRead:
+    for bill in _bills:
+        if bill.id == bill_id:
+            return bill
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Bill not found.",
+    )
