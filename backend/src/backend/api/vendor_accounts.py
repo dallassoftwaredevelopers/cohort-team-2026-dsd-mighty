@@ -5,7 +5,6 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.schemas.vendor_account import (
-    PageVendorAccountRead,
     VendorAccountCreate,
     VendorAccountRead,
     VendorAccountUpdate,
@@ -17,45 +16,6 @@ router = APIRouter(
 )
 
 vendor_accounts: dict[UUID, VendorAccountRead] = {}
-
-
-@router.get("", response_model=PageVendorAccountRead)
-def list_vendor_accounts(
-    property_id: UUID | None = None,
-    vendor_id: UUID | None = None,
-    account_number: str | None = None,
-    skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=25, ge=1, le=100),
-):
-    accounts = list(vendor_accounts.values())
-
-    if property_id is not None:
-        accounts = [
-            account for account in accounts
-            if account.property_id == property_id
-        ]
-
-    if vendor_id is not None:
-        accounts = [
-            account for account in accounts
-            if account.vendor_id == vendor_id
-        ]
-
-    if account_number is not None:
-        accounts = [
-            account for account in accounts
-            if account.account_number == account_number
-        ]
-
-    total = len(accounts)
-    page = accounts[skip : skip + limit]
-
-    return {
-        "items": page,
-        "total": total,
-        "skip": skip,
-        "limit": limit,
-    }
 
 
 @router.post(

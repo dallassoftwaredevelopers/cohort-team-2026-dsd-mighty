@@ -11,7 +11,10 @@ router = APIRouter(
 
 @router.get("", response_model=list[ApprovalRead])
 def list_approvals(
-    status_filter: ApprovalStatus = Query(default=ApprovalStatus.pending, alias="status"),
+    status_filter: ApprovalStatus = Query(
+    default="pending",
+    alias="status",
+),
     bill_id: UUID | None = None,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=25, ge=1, le=100),

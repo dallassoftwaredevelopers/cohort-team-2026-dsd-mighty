@@ -3,6 +3,7 @@ from http.client import HTTPException
 from uuid import UUID, uuid4
 from fastapi import APIRouter, status
 from backend.schemas.bill import BillCreate, BillRead, BillStatus
+from backend.schemas.user import UserSummary
 
 router = APIRouter(
     prefix="/bills",
@@ -16,7 +17,10 @@ def create_bill(bill: BillCreate) -> BillRead:
     new_bill = BillRead(
         **bill.model_dump(),
         id=uuid4(),
-        #add in submitted_by which user
+        submitted_by=UserSummary(
+            id=uuid4(),
+            full_name="Demo User",
+        ),
         status=BillStatus.draft,
         created_at=datetime.now(UTC),
     )

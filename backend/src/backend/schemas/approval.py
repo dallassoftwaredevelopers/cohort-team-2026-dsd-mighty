@@ -4,11 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel,  ConfigDict, model_validator
 from enum import Enum
 from backend.schemas.user import UserSummary
-
-class ApprovalStatus(Enum):
-    PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
+from backend.schemas.common import ApprovalStatus
 
 class ApprovalDecisionType(Enum):
     APPROVE = "approve"
