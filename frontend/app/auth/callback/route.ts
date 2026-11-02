@@ -9,7 +9,7 @@ function safeNextPath(next: string | null, origin: string) {
       return `${url.pathname}${url.search}${url.hash}`;
     }
   } catch {
-    console.error("Invalid URL");
+    console.error("auth callback: unparseable next param", next);
   }
   return "/dashboard";
 }
@@ -20,12 +20,17 @@ export async function GET(request: Request) {
   const next = safeNextPath(searchParams.get("next"), origin);
 
   if (code) {
-    const supabase = await createClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-
-    if (!error) {
-      return NextResponse.redirect(`${origin}${next}`);
+    try {
+      const supabase = await createClient();
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
+      if (!error) {
+        return NextResponse.redirect(`${origin}${next}`);
+      }
+      console.error("auth callback: code exchange failed", error.message);
+    } catch (err) {
+      console.error("auth callback: unexpected error", err);
     }
   }
+
   return NextResponse.redirect(`${origin}/login?error=auth_callback_failed`);
 }
