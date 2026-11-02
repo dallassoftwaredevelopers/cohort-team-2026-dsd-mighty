@@ -59,7 +59,7 @@ export default function SignupPage() {
         return;
       }
       setCheckEmail(true);
-    } catch {
+    } catch (error) {
       console.error("Signup failed:", error);
       setError("Something went wrong. Please try again.");
     } finally {
