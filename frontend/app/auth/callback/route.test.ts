@@ -20,6 +20,9 @@ describe("GET /auth/callback", () => {
     jest.resetAllMocks();
     jest.spyOn(console, "error").mockImplementation(() => {});
   });
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
 
   it("exchanges the code and redirects to the dashboard", async () => {
     mockExchange.mockResolvedValue({ error: null });
