@@ -5,9 +5,11 @@ import LoginPage from "./page";
 const mockPush = jest.fn();
 const mockRefresh = jest.fn();
 const mockSignInWithPassword = jest.fn();
+const mockSearchParams = jest.fn();
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockPush, refresh: mockRefresh }),
+  useSearchParams: () => mockSearchParams(),
 }));
 
 jest.mock("@/lib/supabase/client", () => ({
@@ -26,6 +28,7 @@ async function fillForm(email: string, password: string) {
 describe("Log in", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockSearchParams.mockReturnValue(new URLSearchParams());
   });
 
   it("shows an error and stays on the page when credentials are wrong", async () => {
@@ -54,5 +57,13 @@ describe("Log in", () => {
 
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/dashboard"));
     expect(mockRefresh).toHaveBeenCalled();
+  });
+
+  it("shows a message when the auth callback failed", () => {
+    mockSearchParams.mockReturnValue(new URLSearchParams("error=auth_callback_failed"));
+
+    render(<LoginPage />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/couldn't finish confirming/i);
   });
 });

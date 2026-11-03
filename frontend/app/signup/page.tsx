@@ -44,7 +44,7 @@ export default function SignupPage() {
         email: normalizedEmail,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/dashboard`,
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
         },
       });
 
@@ -59,7 +59,7 @@ export default function SignupPage() {
         return;
       }
       setCheckEmail(true);
-    } catch {
+    } catch (error) {
       console.error("Signup failed:", error);
       setError("Something went wrong. Please try again.");
     } finally {
