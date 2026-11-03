@@ -13,6 +13,7 @@ import {
   LuUserRoundCog,
   LuUsers,
 } from "react-icons/lu";
+import { useAuth } from "@/auth/AuthProvider";
 
 export default function Sidebar() {
   // for testing
@@ -20,6 +21,9 @@ export default function Sidebar() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const router = useRouter();
+  const { user, profile, loading } = useAuth();
+  console.log(user);
+  console.log(profile);
 
   // invoices
   //invoices/new
@@ -127,7 +131,7 @@ export default function Sidebar() {
             </li>
           </ul>
           <ul className="space-y-4">
-            {isLoggedIn && <li className="capitalize hidden sm:block">username</li>}
+            {user && <li className="capitalize hidden sm:block">{user?.email}</li>}
             <li>
               <Link title="Settings" href="/settings" className="flex items-center gap-2">
                 <LuSettings size={20} aria-hidden="true" />
