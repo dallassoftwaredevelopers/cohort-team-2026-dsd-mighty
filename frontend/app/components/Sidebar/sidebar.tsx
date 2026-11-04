@@ -9,10 +9,13 @@ import {
   LuHouse,
   LuLayoutDashboard,
   LuLogOut,
+  LuMoon,
   LuSettings,
+  LuSun,
   LuUserRoundCog,
   LuUsers,
 } from "react-icons/lu";
+import { useTheme } from "@/context/ThemeContext";
 
 export default function Sidebar() {
   // for testing
@@ -20,6 +23,7 @@ export default function Sidebar() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const router = useRouter();
+  const { theme, toggleTheme } = useTheme();
 
   // invoices
   //invoices/new
@@ -46,14 +50,8 @@ export default function Sidebar() {
   return (
     <>
       <nav>
-        <div
-          style={{
-            backgroundColor: "var(--foreground)",
-            color: "var(--background)",
-          }}
-          className="fixed h-full w-8 sm:w-36 border px-1 sm:pl-4 py-8  flex flex-col justify-between bg-dark"
-        >
-          <ul className="space-y-4">
+        <div className="fixed h-full w-8 sm:w-36 border-r border-border bg-surface text-foreground px-1 sm:pl-3 sm:pr-2 py-8 flex flex-col justify-between">
+          <ul className="space-y-1">
             <li>
               <Link
                 title="Home"
@@ -112,22 +110,45 @@ export default function Sidebar() {
           </ul>
           {/* Control panel sued for testing btwn signed in users and admin while auth is still being setup*/}
           {/* Control Panel area will be deleted once auth is set up  */}
-          <ul>
-            <li>Control Panel</li>
+          <ul className="text-sm text-foreground-muted">
+            <li className="font-medium text-foreground">Control Panel</li>
             {!isLoggedIn && (
               <li>
-                <button onClick={signin}>Log in</button>
+                <button onClick={signin} className="hover:text-foreground cursor-pointer">
+                  Log in
+                </button>
               </li>
             )}
             <li>{isAdmin ? "is admin" : "is analyst"}</li>
             <li>
-              <button className="cursor-pointer" onClick={toggleAdmin}>
+              <button className="hover:text-foreground cursor-pointer" onClick={toggleAdmin}>
                 toggle admin
               </button>
             </li>
           </ul>
-          <ul className="space-y-4">
-            {isLoggedIn && <li className="capitalize hidden sm:block">username</li>}
+          <ul className="space-y-1">
+            {isLoggedIn && (
+              <li className="capitalize hidden sm:block px-1 pb-2 text-foreground-muted">
+                username
+              </li>
+            )}
+            <li>
+              <button
+                onClick={toggleTheme}
+                title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+                aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+                className="flex w-full items-center gap-2 rounded-md px-1 py-1.5 text-foreground-muted hover:bg-surface-muted hover:text-foreground transition-colors cursor-pointer"
+              >
+                {theme === "light" ? (
+                  <LuMoon size={20} aria-hidden="true" />
+                ) : (
+                  <LuSun size={20} aria-hidden="true" />
+                )}
+                <span className="hidden sm:block">
+                  {theme === "light" ? "Dark Mode" : "Light Mode"}
+                </span>
+              </button>
+            </li>
             <li>
               <Link title="Settings" href="/settings" className="flex items-center gap-2">
                 <LuSettings size={20} aria-hidden="true" />
@@ -137,7 +158,10 @@ export default function Sidebar() {
 
             {isLoggedIn && (
               <li>
-                <button onClick={signout} className="flex items-center gap-2">
+                <button
+                  onClick={signout}
+                  className="flex w-full items-center gap-2 rounded-md px-1 py-1.5 text-foreground-muted hover:bg-surface-muted hover:text-foreground transition-colors cursor-pointer"
+                >
                   <LuLogOut size={20} aria-hidden="true" />
                   <span className="hidden sm:block">Sign Out</span>
                 </button>
