@@ -1,9 +1,14 @@
 from io import BytesIO
+from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException, UploadFile
+from fastapi.testclient import TestClient
 from starlette.datastructures import Headers
 
+from backend.app import app
+from backend.auth import require_active_analyst
 from backend.services.bill_storage import validate_pdf
 
 
@@ -40,3 +45,76 @@ async def test_rejects_non_pdf():
         await validate_pdf(file)
 
     assert exc.value.status_code == 400
+
+
+def test_upload_document_requires_authentication():
+    client = TestClient(app)
+
+    bill_id = uuid4()
+
+    response = client.post(
+        f"/bills/{bill_id}/document",
+        files={
+            "file": (
+                "invoice.pdf",
+                b"%PDF-1.4\nsample",
+                "application/pdf",
+            )
+        },
+    )
+
+    assert response.status_code == 401
+
+
+def test_upload_document_success():
+    bill_id = uuid4()
+    user_id = str(uuid4())
+    storage_path = f"bills/{bill_id}/invoice.pdf"
+
+    app.dependency_overrides[require_active_analyst] = lambda: user_id
+
+    try:
+        with (
+            patch("backend.api.bill_documents.get_admin_supabase"),
+            patch(
+                "backend.api.bill_documents.get_editable_draft",
+                return_value={
+                    "bill_id": str(bill_id),
+                    "status": "draft",
+                    "document_path": None,
+                },
+            ),
+            patch(
+                "backend.api.bill_documents.generate_storage_path",
+                return_value=storage_path,
+            ),
+            patch("backend.api.bill_documents.upload_pdf") as mock_upload,
+            patch(
+                "backend.api.bill_documents.attach_document",
+                return_value={
+                    "bill_id": str(bill_id),
+                    "status": "draft",
+                    "document_path": storage_path,
+                },
+            ) as mock_attach,
+        ):
+            client = TestClient(app)
+
+            response = client.post(
+                f"/bills/{bill_id}/document",
+                files={
+                    "file": (
+                        "invoice.pdf",
+                        b"%PDF-1.4\nsample",
+                        "application/pdf",
+                    )
+                },
+            )
+
+            assert response.status_code == 201
+            assert response.json()["document_path"] == storage_path
+
+            mock_upload.assert_called_once()
+            mock_attach.assert_called_once()
+    finally:
+        app.dependency_overrides.clear()

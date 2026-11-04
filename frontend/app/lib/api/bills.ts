@@ -78,19 +78,35 @@ export async function createBill(payload: BillCreatePayload): Promise<Bill> {
   return res.json();
 }
 
-export async function validateInvoicePdf(
-  file: File,
-): Promise<{ bill_id: string; validated_size: number }> {
-  const formData = new FormData();
+export type DocumentUploadResponse = {
+  bill_id: string;
+  document_path: string;
+  status: string;
+};
 
+export async function uploadInvoicePdf(
+  file: File,
+  billId: string,
+): Promise<DocumentUploadResponse> {
+  const supabase = createClient();
+
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
+
+  if (sessionError || !session?.access_token) {
+    throw new Error("You must be signed in to upload a PDF.");
+  }
+
+  const formData = new FormData();
   formData.append("file", file);
 
-  // Temporary ID for local validation testing only.
-  // No real bill is created or modified.
-  const testBillId = crypto.randomUUID();
-
-  const response = await fetch(`${apiUrl()}/bills/${testBillId}/document`, {
+  const response = await fetch(`${apiUrl()}/bills/${billId}/document`, {
     method: "POST",
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+    },
     body: formData,
   });
 
@@ -98,9 +114,7 @@ export async function validateInvoicePdf(
     const error = await response.json().catch(() => null);
 
     throw new Error(
-      typeof error?.detail === "string"
-        ? error.detail
-        : `PDF validation failed (${response.status})`,
+      typeof error?.detail === "string" ? error.detail : `Upload failed (${response.status})`,
     );
   }
 

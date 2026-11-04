@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { saveBillDraft, uploadInvoicePdf } from "@/lib/api/bills";
 import { accountStatuses } from "@/lib/invoice-form-schema";
 import { InvoiceForm } from "./invoice-form";
 
@@ -14,12 +15,15 @@ jest.mock("next/navigation", () => ({
 jest.mock("@/lib/api/bills", () => ({
   createBill: jest.fn(),
   saveBillDraft: jest.fn(),
-  validateInvoicePdf: jest.fn(),
+  uploadInvoicePdf: jest.fn(),
 }));
 
 function pdf(name = "invoice.pdf", type = "application/pdf") {
   return new File(["%PDF-1.4"], name, { type });
 }
+
+const mockSaveBillDraft = saveBillDraft as jest.MockedFunction<typeof saveBillDraft>;
+const mockUploadInvoicePdf = uploadInvoicePdf as jest.MockedFunction<typeof uploadInvoicePdf>;
 
 function dropZone() {
   return screen.getByText("Upload / import invoice (PDF)").closest("label") as HTMLElement;
@@ -78,15 +82,12 @@ describe("InvoiceForm", () => {
   });
 
   describe("PDF drag and drop", () => {
-    it("selects a dropped PDF and enables validation", () => {
+    it("selects a dropped PDF", () => {
       render(<InvoiceForm />);
-      const validate = screen.getByRole("button", { name: "Validate PDF" });
-      expect(validate).toBeDisabled();
 
       fireEvent.drop(dropZone(), { dataTransfer: { files: [pdf()] } });
 
       expect(screen.getByText("invoice.pdf")).toBeInTheDocument();
-      expect(validate).toBeEnabled();
     });
 
     it("accepts a .pdf file with an empty MIME type", () => {
@@ -105,7 +106,7 @@ describe("InvoiceForm", () => {
       });
 
       expect(screen.getByRole("alert")).toHaveTextContent("Only PDF files can be uploaded.");
-      expect(screen.getByRole("button", { name: "Validate PDF" })).toBeDisabled();
+      expect(screen.queryByText("photo.png")).not.toBeInTheDocument();
     });
 
     it("rejects dropping more than one file", () => {
@@ -135,6 +136,67 @@ describe("InvoiceForm", () => {
       await user.upload(container.querySelector("#invoicePdf") as HTMLInputElement, pdf());
 
       expect(screen.getByText("invoice.pdf")).toBeInTheDocument();
+    });
+  });
+
+  describe("PDF upload", () => {
+    beforeEach(() => {
+      mockSaveBillDraft.mockReset();
+      mockUploadInvoicePdf.mockReset();
+    });
+
+    it("requires a saved draft before a PDF can be uploaded", () => {
+      render(<InvoiceForm />);
+
+      fireEvent.drop(dropZone(), { dataTransfer: { files: [pdf()] } });
+
+      expect(screen.getByRole("button", { name: "Save Draft First" })).toBeDisabled();
+    });
+
+    it("uploads the selected PDF against the saved draft", async () => {
+      const user = userEvent.setup();
+      mockSaveBillDraft.mockResolvedValue({
+        bill_id: "bill-1",
+        status: "draft",
+        document_path: null,
+      });
+      mockUploadInvoicePdf.mockResolvedValue({
+        bill_id: "bill-1",
+        document_path: "bills/bill-1/invoice.pdf",
+        status: "draft",
+      });
+      render(<InvoiceForm />);
+
+      await user.click(screen.getByRole("button", { name: "Save Draft" }));
+      const upload = await screen.findByRole("button", { name: "Upload PDF" });
+      expect(upload).toBeDisabled();
+
+      const file = pdf();
+      fireEvent.drop(dropZone(), { dataTransfer: { files: [file] } });
+      expect(upload).toBeEnabled();
+
+      await user.click(upload);
+
+      expect(mockUploadInvoicePdf).toHaveBeenCalledWith(file, "bill-1");
+      expect(await screen.findByRole("button", { name: "PDF Saved ✓" })).toBeDisabled();
+    });
+
+    it("offers a retry when the upload fails", async () => {
+      const user = userEvent.setup();
+      mockSaveBillDraft.mockResolvedValue({
+        bill_id: "bill-1",
+        status: "draft",
+        document_path: null,
+      });
+      mockUploadInvoicePdf.mockRejectedValue(new Error("Unable to store the invoice PDF."));
+      render(<InvoiceForm />);
+
+      await user.click(screen.getByRole("button", { name: "Save Draft" }));
+      fireEvent.drop(dropZone(), { dataTransfer: { files: [pdf()] } });
+      await user.click(await screen.findByRole("button", { name: "Upload PDF" }));
+
+      expect(await screen.findByRole("button", { name: "Retry Upload" })).toBeEnabled();
+      expect(screen.getByText("Unable to store the invoice PDF.")).toBeInTheDocument();
     });
   });
 });

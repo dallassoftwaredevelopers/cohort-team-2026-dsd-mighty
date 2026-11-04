@@ -49,3 +49,10 @@ def upload_pdf(
             "upsert": "false",
         },
     )
+
+
+def delete_pdf(
+    client: Client,
+    storage_path: str,
+) -> None:
+    client.storage.from_(BUCKET_NAME).remove([storage_path])

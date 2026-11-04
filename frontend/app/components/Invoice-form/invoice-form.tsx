@@ -11,7 +11,7 @@ import {
   type BillCreatePayload,
   createBill,
   saveBillDraft,
-  validateInvoicePdf,
+  uploadInvoicePdf,
 } from "@/lib/api/bills";
 import {
   accountStatuses,
@@ -37,6 +37,7 @@ export function InvoiceForm() {
   const [draftMessage, setDraftMessage] = useState("");
   const [pdfStatus, setPdfStatus] = useState<ActionStatus>("idle");
   const [draftStatus, setDraftStatus] = useState<ActionStatus>("idle");
+  const [draftId, setDraftId] = useState<string | null>(null);
   const [createStatus, setCreateStatus] = useState<ActionStatus>("idle");
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -131,21 +132,21 @@ export function InvoiceForm() {
     selectFile(files[0] ?? null);
   }
 
-  async function handleValidatePdf() {
-    if (!selectedFile) return;
+  async function handleUploadPdf() {
+    if (!selectedFile || !draftId) return;
 
     setPdfStatus("loading");
     setUploadError("");
     setUploadMessage("");
 
     try {
-      const result = await validateInvoicePdf(selectedFile);
+      const result = await uploadInvoicePdf(selectedFile, draftId);
 
       setPdfStatus("success");
-      setUploadMessage(`PDF validated by backend (${result.validated_size} bytes). Not saved yet.`);
+      setUploadMessage(`PDF saved successfully: ${result.document_path}`);
     } catch (error) {
       setPdfStatus("error");
-      setUploadError(error instanceof Error ? error.message : "Unable to validate PDF.");
+      setUploadError(error instanceof Error ? error.message : "Unable to upload PDF.");
     }
   }
 
@@ -173,6 +174,7 @@ export function InvoiceForm() {
 
       const saved = await saveBillDraft(payload);
 
+      setDraftId(saved.bill_id);
       setDraftStatus("success");
       setDraftMessage(`Draft saved successfully: ${saved.bill_id}`);
     } catch (error) {
@@ -258,17 +260,19 @@ export function InvoiceForm() {
 
         <button
           type="button"
-          onClick={handleValidatePdf}
-          disabled={!selectedFile || pdfStatus === "loading" || pdfStatus === "success"}
+          onClick={handleUploadPdf}
+          disabled={!selectedFile || !draftId || pdfStatus === "loading" || pdfStatus === "success"}
           className="mt-4 rounded-md bg-blue-600 px-4 py-2 text-white disabled:opacity-50"
         >
           {pdfStatus === "loading"
-            ? "Validating..."
+            ? "Uploading..."
             : pdfStatus === "success"
-              ? "PDF Validated ✓"
+              ? "PDF Saved ✓"
               : pdfStatus === "error"
-                ? "Retry Validation"
-                : "Validate PDF"}
+                ? "Retry Upload"
+                : !draftId
+                  ? "Save Draft First"
+                  : "Upload PDF"}
         </button>
 
         {uploadMessage && (
