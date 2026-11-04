@@ -1,8 +1,12 @@
+import logging
+
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from supabase_auth.errors import AuthApiError
 
 from backend.supabase_client import get_admin_supabase, get_supabase
+
+logger = logging.getLogger(__name__)
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -34,15 +38,23 @@ def require_active_analyst(
             detail="Invalid access token",
         )
 
-    admin = get_admin_supabase()
-
-    result = (
-        admin.table("app_users")
-        .select("role,status")
-        .eq("user_id", str(user.id))
-        .maybe_single()
-        .execute()
-    )
+    # A database outage must not look like "not authorized" (403) or crash as
+    # an unhandled 500: the client gets a clear, retryable 503.
+    try:
+        result = (
+            get_admin_supabase()
+            .table("app_users")
+            .select("role,status")
+            .eq("user_id", str(user.id))
+            .maybe_single()
+            .execute()
+        )
+    except Exception as exc:
+        logger.exception("app_users lookup failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to verify account.",
+        ) from exc
 
     # maybe_single() returns None (not an empty result) when no row matches.
     app_user = result.data if result is not None else None

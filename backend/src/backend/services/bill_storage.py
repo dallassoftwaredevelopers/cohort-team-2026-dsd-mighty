@@ -9,6 +9,9 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MiB
 
 
 async def validate_pdf(file: UploadFile) -> bytes:
+    # The declared content type comes from the client and can be anything: it
+    # is only a cheap first filter. The `%PDF-` signature check below is the
+    # real guard; do not remove it on the assumption that this check suffices.
     if file.content_type != "application/pdf":
         raise HTTPException(
             status_code=415,

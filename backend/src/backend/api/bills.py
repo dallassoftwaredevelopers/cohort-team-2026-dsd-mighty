@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from backend.auth import require_active_analyst
 from backend.schemas.bill import (
     BillCreate,
+    BillDashboardRow,
     BillDraftCreate,
     BillDraftRead,
     BillRead,
@@ -49,7 +50,7 @@ def list_bills() -> list[BillRead]:
     return _bills
 
 
-@router.get("/dashboard")
+@router.get("/dashboard", response_model=list[BillDashboardRow])
 def get_dashboard_bills(
     user_id: str = Depends(require_active_analyst),
 ) -> list[dict]:
