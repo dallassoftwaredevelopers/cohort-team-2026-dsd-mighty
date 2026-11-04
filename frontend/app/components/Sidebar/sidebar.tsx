@@ -15,6 +15,7 @@ import {
   LuUserRoundCog,
   LuUsers,
 } from "react-icons/lu";
+import { useAuth } from "@/auth/AuthProvider";
 import { useTheme } from "@/context/ThemeContext";
 
 export default function Sidebar() {
@@ -23,6 +24,7 @@ export default function Sidebar() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const router = useRouter();
+  const { user, profile, loading } = useAuth();
   const { theme, toggleTheme } = useTheme();
 
   // invoices
@@ -127,11 +129,10 @@ export default function Sidebar() {
             </li>
           </ul>
           <ul className="space-y-1">
-            {isLoggedIn && (
-              <li className="capitalize hidden sm:block px-1 pb-2 text-foreground-muted">
-                username
-              </li>
-            )}
+            <li className="capitalize hidden sm:block px-1 pb-2 text-foreground-muted">
+              {user?.email}
+            </li>
+
             <li>
               <button
                 onClick={toggleTheme}
