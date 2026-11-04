@@ -17,7 +17,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
-  const supabase = createClient();
+  const [supabase] = useState(() => createClient());
 
   useEffect(() => {
     let active = true;
@@ -64,10 +64,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (user) {
           await loadProfile(user.id);
         }
-
-        if (active) setLoading(false);
       } catch (error) {
-        console.error("auth context initialization error:");
+        console.error("auth context initialization error:", error);
+      } finally {
+        setLoading(false);
       }
     }
 
