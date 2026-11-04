@@ -9,8 +9,10 @@ import Button from "@/components/Button";
 import { FormField, inputClass } from "@/components/Form-field/form-field";
 import {
   type BillCreatePayload,
+  type BillDraftPayload,
   createBill,
   saveBillDraft,
+  updateBillDraft,
   uploadInvoicePdf,
 } from "@/lib/api/bills";
 import {
@@ -158,21 +160,27 @@ export function InvoiceForm() {
     try {
       const values = getValues();
 
-      const payload = {
-        account_number_raw: values.accountNumber.trim() || undefined,
-        invoice_number: values.statementId.trim() || undefined,
-        vendor_name_raw: values.companyName.trim() || undefined,
-        invoice_date: values.issueDate || undefined,
-        due_date: values.dueDate || undefined,
-        amount: values.currentDue.trim() || undefined,
-        description: values.description.trim() || undefined,
-        processing_notes: values.notes.trim() || undefined,
-        property_address: values.propertyAddress.trim() || undefined,
-        account_status: values.accountStatus || undefined,
-        website_name: values.websiteName.trim() || undefined,
+      // Blank fields are sent as null so that clearing a field on an
+      // existing draft clears it in the database too.
+      const payload: BillDraftPayload = {
+        account_number_raw: values.accountNumber.trim() || null,
+        invoice_number: values.statementId.trim() || null,
+        vendor_name_raw: values.companyName.trim() || null,
+        invoice_date: values.issueDate || null,
+        due_date: values.dueDate || null,
+        amount: values.currentDue.trim() || null,
+        prev_payments: values.previousPayments.trim() || null,
+        description: values.description.trim() || null,
+        processing_notes: values.notes.trim() || null,
+        property_address: values.propertyAddress.trim() || null,
+        account_status: values.accountStatus || null,
+        website_name: values.websiteName.trim() || null,
       };
 
-      const saved = await saveBillDraft(payload);
+      // The first save creates the draft; later saves update the same bill.
+      const saved = draftId
+        ? await updateBillDraft(draftId, payload)
+        : await saveBillDraft(payload);
 
       setDraftId(saved.bill_id);
       setDraftStatus("success");
@@ -184,7 +192,21 @@ export function InvoiceForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} noValidate className="mx-auto max-w-3xl space-y-6">
+    <form
+      onSubmit={handleSubmit(onSubmit)}
+      onChange={(event) => {
+        // Editing a field after a save means there are unsaved changes.
+        // Choosing a PDF is not a draft edit, so the file input is ignored.
+        const target = event.target;
+        if (target instanceof HTMLInputElement && target.type === "file") return;
+        if (draftStatus === "success") {
+          setDraftStatus("idle");
+          setDraftMessage("");
+        }
+      }}
+      noValidate
+      className="mx-auto max-w-3xl space-y-6"
+    >
       {submitError && (
         <p
           role="alert"
@@ -217,7 +239,7 @@ export function InvoiceForm() {
             }
             type="button"
             onClick={handleSaveDraft}
-            disabled={draftStatus === "loading" || draftStatus === "success"}
+            disabled={draftStatus === "loading"}
           />
           <Button
             label="Cancel"
