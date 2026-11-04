@@ -1,10 +1,19 @@
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
-from backend.schemas.bill import BillCreate, BillRead, BillStatus
+from backend.auth import require_active_analyst
+from backend.schemas.bill import (
+    BillCreate,
+    BillDraftCreate,
+    BillDraftRead,
+    BillRead,
+    BillStatus,
+)
 from backend.schemas.user import UserSummary
+from backend.services.bill_repository import create_draft
+from backend.supabase_client import get_admin_supabase
 
 router = APIRouter(
     prefix="/bills",
@@ -45,3 +54,21 @@ def get_bill(bill_id: UUID) -> BillRead:
         status_code=status.HTTP_404_NOT_FOUND,
         detail="Bill not found.",
     )
+
+
+@router.post(
+    "/drafts",
+    response_model=BillDraftRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def save_new_draft(
+    draft: BillDraftCreate,
+    user_id: str = Depends(require_active_analyst),
+) -> BillDraftRead:
+    saved = create_draft(
+        client=get_admin_supabase(),
+        draft=draft,
+        user_id=user_id,
+    )
+
+    return BillDraftRead.model_validate(saved)

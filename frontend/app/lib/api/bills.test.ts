@@ -26,12 +26,16 @@ const savedBill = {
 describe("createBill", () => {
   const fetchMock = jest.fn();
 
+  const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
+
   beforeEach(() => {
+    process.env.NEXT_PUBLIC_API_URL = "http://api.test";
     global.fetch = fetchMock as unknown as typeof fetch;
   });
 
   afterEach(() => {
     fetchMock.mockReset();
+    process.env.NEXT_PUBLIC_API_URL = originalApiUrl;
   });
 
   it("POSTs the payload to /bills and returs successful", async () => {
@@ -43,6 +47,7 @@ describe("createBill", () => {
     const result = await createBill(payload);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("http://api.test/bills");
     expect(result).toEqual(savedBill);
   });
   it("throws the server detail message on an HTTP Error", async () => {
@@ -52,5 +57,12 @@ describe("createBill", () => {
       json: async () => ({ detail: "Bill not found." }),
     });
     await expect(createBill(payload)).rejects.toThrow("Bill not found.");
+  });
+
+  it("reports a missing API URL instead of a network error", async () => {
+    delete process.env.NEXT_PUBLIC_API_URL;
+
+    await expect(createBill(payload)).rejects.toThrow("NEXT_PUBLIC_API_URL is missing");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

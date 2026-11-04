@@ -68,3 +68,20 @@ class BillRead(BillBase):
     exception_reason: str | None = None
     document_path: str | None = None
     created_at: datetime
+
+
+class BillDraftCreate(BillUpdate):
+    """Fields that may be provided when creating a draft."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+
+class BillDraftRead(BaseModel):
+    """Response returned after a draft is created."""
+
+    bill_id: UUID
+    status: BillStatus
+    document_path: str | None = None
