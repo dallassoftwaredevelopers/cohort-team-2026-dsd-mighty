@@ -1,5 +1,9 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
+if (!API_URL) {
+  throw new Error("NEXT_PUBLIC_SUPABASE_API_URL is missing. Check frontend/.env.local");
+}
+
 export type BillStatus =
   | "draft"
   | "pending_approval"
@@ -66,4 +70,33 @@ export async function createBill(payload: BillCreatePayload): Promise<Bill> {
     throw new Error(error?.detail ?? `Request failed (${res.status})`);
   }
   return res.json();
+}
+
+export async function validateInvoicePdf(
+  file: File,
+): Promise<{ bill_id: string; validated_size: number }> {
+  const formData = new FormData();
+
+  formData.append("file", file);
+
+  // Temporary ID for local validation testing only.
+  // No real bill is created or modified.
+  const testBillId = crypto.randomUUID();
+
+  const response = await fetch(`${API_URL}/bills/${testBillId}/document`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => null);
+
+    throw new Error(
+      typeof error?.detail === "string"
+        ? error.detail
+        : `PDF validation failed (${response.status})`,
+    );
+  }
+
+  return response.json();
 }

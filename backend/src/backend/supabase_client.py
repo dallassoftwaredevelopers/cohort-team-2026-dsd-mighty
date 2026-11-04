@@ -22,3 +22,9 @@ def get_supabase() -> Client:
     else:
         print("Supabase url and Supabase key found")
     return create_client(url, key)
+
+
+def get_admin_supabase() -> Client:
+    url = os.environ["SUPABASE_URL"]
+    key = os.environ["SUPABASE_SECRET_KEY"]
+    return create_client(url, key)

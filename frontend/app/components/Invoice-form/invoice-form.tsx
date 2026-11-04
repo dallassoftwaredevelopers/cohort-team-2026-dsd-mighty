@@ -8,7 +8,7 @@ import { useForm } from "react-hook-form";
 import Button from "@/components/Button";
 import { FormField, inputClass } from "@/components/Form-field/form-field";
 import type { BillCreatePayload } from "@/lib/api/bills";
-import { createBill } from "@/lib/api/bills";
+import { createBill, validateInvoicePdf } from "@/lib/api/bills";
 import {
   accountStatuses,
   emptyInvoiceForm,
@@ -19,6 +19,10 @@ import {
 export function InvoiceForm() {
   const router = useRouter();
   const [submitError, setSubmitError] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState("");
+  const [uploadError, setUploadError] = useState("");
 
   const {
     register,
@@ -59,6 +63,24 @@ export function InvoiceForm() {
     }
   }
 
+  async function handleValidatePdf() {
+    if (!selectedFile) return;
+
+    setIsValidating(true);
+    setUploadError("");
+    setUploadMessage("");
+
+    try {
+      const result = await validateInvoicePdf(selectedFile);
+
+      setUploadMessage(`PDF validated by backend (${result.validated_size} bytes). Not saved yet.`);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Unable to validate PDF.");
+    } finally {
+      setIsValidating(false);
+    }
+  }
+
   return (
     <form onSubmit={handleSubmit(onSubmit)} noValidate className="mx-auto max-w-3xl space-y-6">
       {submitError && (
@@ -85,8 +107,42 @@ export function InvoiceForm() {
 
       <section className="rounded-xl border border-dashed border-border bg-surface p-6 text-center">
         <FileUp className="mx-auto h-6 w-6 text-foreground-muted" />
-        <p className="mt-2 text-sm font-medium text-foreground">Upload / import invoice (PDF)</p>
-        <p className="text-xs text-foreground-muted">Coming soon</p>
+
+        <p className="mt-2 text-sm font-medium">Upload / import invoice (PDF)</p>
+
+        <input
+          type="file"
+          accept=".pdf,application/pdf"
+          className="mt-4 block w-full text-sm"
+          onChange={(event) => {
+            const file = event.target.files?.[0] ?? null;
+
+            setSelectedFile(file);
+            setUploadMessage("");
+            setUploadError("");
+          }}
+        />
+
+        <button
+          type="button"
+          onClick={handleValidatePdf}
+          disabled={!selectedFile || isValidating}
+          className="mt-4 rounded-md bg-blue-600 px-4 py-2 text-white disabled:opacity-50"
+        >
+          {isValidating ? "Validating..." : "Test PDF Validation"}
+        </button>
+
+        {uploadMessage && (
+          <p role="status" className="mt-3 text-sm text-green-700">
+            {uploadMessage}
+          </p>
+        )}
+
+        {uploadError && (
+          <p role="alert" className="mt-3 text-sm text-red-600">
+            {uploadError}
+          </p>
+        )}
       </section>
 
       <fieldset className="space-y-4 rounded-xl border border-border bg-surface p-6 shadow-sm">
