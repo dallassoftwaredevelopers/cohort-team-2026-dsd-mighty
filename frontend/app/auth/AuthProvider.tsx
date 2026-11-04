@@ -45,19 +45,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     async function initialize() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      try {
+        const {
+          data: { user },
+          error,
+        } = await supabase.auth.getUser();
 
-      if (!active) return;
+        if (!active) return;
 
-      setUser(user);
+        if (error) {
+          console.error("Error fetching supabase user:", error);
+          if (active) setUser(null);
+          return;
+        }
 
-      if (user) {
-        await loadProfile(user.id);
+        setUser(user);
+
+        if (user) {
+          await loadProfile(user.id);
+        }
+
+        if (active) setLoading(false);
+      } catch (error) {
+        console.error("auth context initialization error:");
       }
-
-      if (active) setLoading(false);
     }
 
     initialize();

@@ -22,8 +22,6 @@ export default function Sidebar() {
   const [isAdmin, setIsAdmin] = useState(false);
   const router = useRouter();
   const { user, profile, loading } = useAuth();
-  console.log(user);
-  console.log(profile);
 
   // invoices
   //invoices/new
