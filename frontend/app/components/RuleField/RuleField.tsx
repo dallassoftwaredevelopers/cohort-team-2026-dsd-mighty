@@ -14,6 +14,7 @@ type Props = {
   tooltip: string;
   value: string;
   onChange: (value: string) => void;
+  hint?: string;
   error?: string;
   prefix?: string;
   currency?: boolean;
@@ -30,6 +31,7 @@ export default function RuleField({
   value,
   onChange,
   error,
+  hint,
   prefix,
   currency = false,
   inputMode = "decimal",
@@ -37,6 +39,10 @@ export default function RuleField({
   const [editing, setEditing] = useState(false);
   const id = useId();
   const errorId = `${id}-error`;
+  const hintId = `${id}-hint`;
+
+  const describedBy =
+    [hint ? hintId : null, error ? errorId : null].filter(Boolean).join(" ") || undefined;
 
   const handleChange = (raw: string) => {
     onChange(currency ? sanitizeCurrencyInput(raw) : sanitizeWholeNumberInput(raw));
@@ -69,7 +75,7 @@ export default function RuleField({
             disabled={!editing}
             onChange={(e) => handleChange(e.target.value)}
             aria-invalid={!!error}
-            aria-describedby={error ? errorId : undefined}
+            aria-describedby={describedBy}
             className="w-full bg-transparent text-foreground outline-none disabled:text-foreground-muted"
           />
         </div>
@@ -82,6 +88,12 @@ export default function RuleField({
           {editing ? COPY.done : COPY.edit}
         </button>
       </div>
+
+      {hint && (
+        <p id={hintId} className="mt-1 text-xs text-foreground-muted">
+          {hint}
+        </p>
+      )}
 
       {error && (
         <p id={errorId} className="mt-1 text-sm text-overdue">

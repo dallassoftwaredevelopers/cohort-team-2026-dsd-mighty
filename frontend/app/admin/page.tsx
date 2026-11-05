@@ -18,6 +18,8 @@ const COPY = {
   confirmIntro: "This changes how invoices get approved for your company:",
   summaryInvoiceMax: "Invoice maximum",
   summaryMinApprovals: "Minimum approvals",
+  invoiceMaximumHint: "Numbers only, up to 2 decimal places (e.g. 5000.50).",
+  minApprovalsHint: "Whole numbers only. Must be at least 1.",
 };
 
 export default function AdminPage() {
@@ -56,6 +58,7 @@ export default function AdminPage() {
         <RuleField
           label={COPY.invoiceMaximum}
           tooltip={COPY.invoiceMaximumTooltip}
+          hint={COPY.invoiceMaximumHint}
           prefix="$"
           value={form.invoice_maximum}
           error={errors.invoice_maximum}
@@ -65,6 +68,7 @@ export default function AdminPage() {
         <RuleField
           label={COPY.minApprovals}
           tooltip={COPY.minApprovalsTooltip}
+          hint={COPY.minApprovalsHint}
           inputMode="numeric"
           value={form.min_approvals}
           error={errors.min_approvals}
