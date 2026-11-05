@@ -1,0 +1,81 @@
+import logging
+
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from supabase_auth.errors import AuthApiError
+
+from backend.supabase_client import get_admin_supabase, get_supabase
+
+logger = logging.getLogger(__name__)
+
+bearer = HTTPBearer(auto_error=False)
+
+
+def require_active_analyst(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+) -> str:
+    if credentials is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required",
+        )
+
+    supabase = get_supabase()
+
+    try:
+        auth_response = supabase.auth.get_user(credentials.credentials)
+    except AuthApiError as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired access token",
+        ) from exc
+    except Exception as exc:
+        # Supabase Auth unreachable (e.g. httpx.ConnectError,
+        # AuthRetryableError): a retryable 503, not an unhandled 500 that the
+        # browser reports as "Failed to fetch" (500s carry no CORS headers).
+        logger.exception("Supabase Auth token check failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to verify account.",
+        ) from exc
+
+    user = auth_response.user if auth_response else None
+
+    if user is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid access token",
+        )
+
+    # A database outage must not look like "not authorized" (403) or crash as
+    # an unhandled 500: the client gets a clear, retryable 503.
+    try:
+        result = (
+            get_admin_supabase()
+            .table("app_users")
+            .select("role,status")
+            .eq("user_id", str(user.id))
+            .maybe_single()
+            .execute()
+        )
+    except Exception as exc:
+        logger.exception("app_users lookup failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to verify account.",
+        ) from exc
+
+    # maybe_single() returns None (not an empty result) when no row matches.
+    app_user = result.data if result is not None else None
+
+    if (
+        not isinstance(app_user, dict)
+        or app_user.get("status") != "active"
+        or app_user.get("role") != "analyst"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Not authorized to create bills",
+        )
+
+    return str(user.id)
