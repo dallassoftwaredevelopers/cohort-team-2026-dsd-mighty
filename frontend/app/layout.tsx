@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Sidebar from "./components/Sidebar/sidebar";
 import "./globals.css";
+import { AuthProvider } from "./auth/AuthProvider";
+import { ThemeProvider } from "./context/ThemeContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -23,8 +25,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       {/* if column width changes, sidebar width must match */}
       <body className="min-h-full grid grid-cols-[2rem_1fr] sm:grid-cols-[9rem_1fr]">
-        <Sidebar />
-        {children}
+        <AuthProvider>
+          <ThemeProvider>
+            <Sidebar />
+            {children}
+          </ThemeProvider>
+        </AuthProvider>
       </body>
     </html>
   );
