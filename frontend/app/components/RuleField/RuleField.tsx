@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
+import { sanitizeCurrencyInput } from "@/lib/currency";
 
 const COPY = {
   tooltipIcon: "?",
@@ -15,8 +16,13 @@ type Props = {
   onChange: (value: string) => void;
   error?: string;
   prefix?: string;
+  currency?: boolean;
   inputMode?: "decimal" | "numeric";
 };
+
+function sanitizeWholeNumberInput(raw: string): string {
+  return raw.replace(/\D/g, "");
+}
 
 export default function RuleField({
   label,
@@ -25,10 +31,16 @@ export default function RuleField({
   onChange,
   error,
   prefix,
+  currency = false,
   inputMode = "decimal",
 }: Props) {
   const [editing, setEditing] = useState(false);
-  const id = label.toLowerCase().replace(/\s+/g, " -");
+  const id = useId();
+  const errorId = `${id}-error`;
+
+  const handleChange = (raw: string) => {
+    onChange(currency ? sanitizeCurrencyInput(raw) : sanitizeWholeNumberInput(raw));
+  };
 
   return (
     <div className="mb-6">
@@ -41,6 +53,7 @@ export default function RuleField({
           {COPY.tooltipIcon}
         </span>
       </div>
+
       <div className="flex items-center gap-4">
         <div
           className={`flex w-full max-w-sm items-center rounded border-2 px-3 py-2 transition-colors focus-within:ring-2 focus-within:ring-ring ${
@@ -54,9 +67,9 @@ export default function RuleField({
             inputMode={inputMode}
             value={value}
             disabled={!editing}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={(e) => handleChange(e.target.value)}
             aria-invalid={!!error}
-            aria-describedby={error ? `${id}-error` : undefined}
+            aria-describedby={error ? errorId : undefined}
             className="w-full bg-transparent text-foreground outline-none disabled:text-foreground-muted"
           />
         </div>
@@ -69,8 +82,9 @@ export default function RuleField({
           {editing ? COPY.done : COPY.edit}
         </button>
       </div>
+
       {error && (
-        <p id={`${id}-error`} className="mt-1 text-sm text-overdue">
+        <p id={errorId} className="mt-1 text-sm text-overdue">
           {error}
         </p>
       )}
