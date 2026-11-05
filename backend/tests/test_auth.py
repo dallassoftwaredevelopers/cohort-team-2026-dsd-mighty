@@ -4,11 +4,12 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+import httpx
 import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.testclient import TestClient
-from supabase_auth.errors import AuthApiError
+from supabase_auth.errors import AuthApiError, AuthRetryableError
 
 from backend.app import app
 from backend.auth import require_active_analyst
@@ -72,6 +73,22 @@ def test_invalid_token_is_401():
     error = AuthApiError("invalid JWT", 401, None)
 
     assert status_of(auth=auth_client(error=error)) == 401
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        httpx.ConnectError("connection refused"),
+        AuthRetryableError("Auth unavailable", 503),
+    ],
+    ids=["connect-error", "retryable-error"],
+)
+def test_unreachable_supabase_auth_is_503_not_500(error):
+    with pytest.raises(HTTPException) as exc:
+        check(auth=auth_client(error=error))
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "Unable to verify account."
 
 
 def test_token_without_a_user_is_401():

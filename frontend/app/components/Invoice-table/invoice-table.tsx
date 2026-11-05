@@ -64,7 +64,7 @@ export function InvoiceTable({ invoices }: { invoices: Invoice[] }) {
             ) : (
               rows.map((invoice) => (
                 <tr
-                  key={invoice.invoiceNumber ?? invoice.id.slice(0, 8)}
+                  key={invoice.id}
                   className="text-foreground transition-colors hover:bg-surface-muted"
                 >
                   <td className="px-6 py-4 font-mono text-xs">

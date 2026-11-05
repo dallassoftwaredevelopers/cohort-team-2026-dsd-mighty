@@ -84,6 +84,15 @@ export type DocumentUploadResponse = {
   status: string;
 };
 
+// A dropped file can have an empty MIME type (the form accepts it by its
+// .pdf extension). FormData would then send it as application/octet-stream
+// and the backend would answer 415, so give it the PDF type explicitly. The
+// backend still checks the %PDF- signature, so this cannot smuggle in a
+// non-PDF.
+export function withPdfType(file: File): File {
+  return file.type ? file : new File([file], file.name, { type: "application/pdf" });
+}
+
 export async function uploadInvoicePdf(
   file: File,
   billId: string,
@@ -100,7 +109,7 @@ export async function uploadInvoicePdf(
   }
 
   const formData = new FormData();
-  formData.append("file", file);
+  formData.append("file", withPdfType(file));
 
   const response = await fetch(`${apiUrl()}/bills/${billId}/document`, {
     method: "POST",

@@ -7,28 +7,25 @@ from supabase import Client, create_client
 load_dotenv()
 
 
-def _env(*names: str) -> str:
-    """Return the first set variable among `names`.
+def _env(name: str) -> str:
+    """Return a required backend setting (see backend/.env.example).
 
-    The repo-root `.env` is shared with the Next.js frontend, so each backend
-    setting also accepts the frontend's `NEXT_*` name as a fallback.
+    Backend settings use backend-only names. There are deliberately no
+    fallbacks to the frontend's `NEXT_*` names: a secret under a `NEXT_` name
+    looks like frontend config, and one slip to `NEXT_PUBLIC_` would ship it
+    to the browser.
     """
-    for name in names:
-        value = os.environ.get(name)
-        if value:
-            return value
-    raise RuntimeError(f"Missing environment variable: set one of {', '.join(names)}")
-
-
-def _supabase_url() -> str:
-    return _env("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL")
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise RuntimeError(
+            f"Missing environment variable {name}; see backend/.env.example"
+        )
+    return value
 
 
 def get_supabase() -> Client:
-    key = _env("SUPABASE_PUBLISHABLE_KEY", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY")
-    return create_client(_supabase_url(), key)
+    return create_client(_env("SUPABASE_URL"), _env("SUPABASE_PUBLISHABLE_KEY"))
 
 
 def get_admin_supabase() -> Client:
-    key = _env("SUPABASE_SECRET_KEY", "NEXT_SUPABASE_SECRET_KEY")
-    return create_client(_supabase_url(), key)
+    return create_client(_env("SUPABASE_URL"), _env("SUPABASE_SECRET_KEY"))

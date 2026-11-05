@@ -1,4 +1,4 @@
-import { type BillCreatePayload, createBill } from "./bills";
+import { type BillCreatePayload, createBill, withPdfType } from "./bills";
 
 const payload: BillCreatePayload = {
   account_number_raw: "ACC-123",
@@ -64,5 +64,23 @@ describe("createBill", () => {
 
     await expect(createBill(payload)).rejects.toThrow("NEXT_PUBLIC_API_URL is missing");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("withPdfType", () => {
+  it("gives a dropped file with an empty MIME type the PDF type", () => {
+    const dropped = new File(["%PDF-1.4"], "scan.pdf", { type: "" });
+
+    const sent = withPdfType(dropped);
+
+    expect(sent.type).toBe("application/pdf");
+    expect(sent.name).toBe("scan.pdf");
+    expect(sent.size).toBe(dropped.size);
+  });
+
+  it("leaves a file that already has a type unchanged", () => {
+    const file = new File(["%PDF-1.4"], "bill.pdf", { type: "application/pdf" });
+
+    expect(withPdfType(file)).toBe(file);
   });
 });

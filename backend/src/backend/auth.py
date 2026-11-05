@@ -29,6 +29,15 @@ def require_active_analyst(
             status_code=401,
             detail="Invalid or expired access token",
         ) from exc
+    except Exception as exc:
+        # Supabase Auth unreachable (e.g. httpx.ConnectError,
+        # AuthRetryableError): a retryable 503, not an unhandled 500 that the
+        # browser reports as "Failed to fetch" (500s carry no CORS headers).
+        logger.exception("Supabase Auth token check failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to verify account.",
+        ) from exc
 
     user = auth_response.user if auth_response else None
 
