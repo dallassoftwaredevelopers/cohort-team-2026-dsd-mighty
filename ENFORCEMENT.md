@@ -15,6 +15,8 @@ The checker runs by `node` from the repo root because the root has no `package.j
 | TypeScript strict; frontend types check before merge | ci | `frontend/tsconfig.json`, `.github/workflows/ci.yml` | - |
 | Frontend builds before merge | ci | `.github/workflows/ci.yml` | - |
 | Every rule above has an enforcer that exists; no exception has expired | ci | `scripts/check-enforcement.mjs`, `.github/workflows/ci.yml` | - |
+| An analyst can never read or change another analyst's bills (routes use the service-role client, so the `submitted_by` filters are the only guard) | test | `backend/tests/test_bill_access.py`, `backend/tests/fake_supabase.py` | - |
+| Invoice PDFs live in a private bucket that browser roles (anon, authenticated) cannot read or write | test | `backend/supabase/migrations/20261104170000_create_invoices_bucket.sql`, `backend/supabase/tests/invoices_bucket.test.sql` | - |
 | Commit messages follow `type(scope): description` | review | - | 2026-12-31 the pre-commit hook does not check messages; no commit-msg hook yet |
 | Biome is the only linter and formatter (no ESLint, no Prettier); lint passes before merge | ci | `frontend/biome.json`, `.github/workflows/ci.yml` | - |
 | Staged frontend and backend files are Biome- and Ruff-fixed before commit | hook | `.husky/pre-commit`, `lint-staged.config.mjs` | - |
