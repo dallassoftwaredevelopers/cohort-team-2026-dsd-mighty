@@ -40,7 +40,7 @@ def get_editable_draft(
 ) -> dict | None:
     response = (
         client.table("bills")
-        .select("bill_id,status,document_path")
+        .select("*")
         .eq("bill_id", str(bill_id))
         .eq("submitted_by", user_id)
         .eq("status", "draft")

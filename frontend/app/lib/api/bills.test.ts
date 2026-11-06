@@ -1,4 +1,5 @@
-import { type BillCreatePayload, createBill, withPdfType } from "./bills";
+import type { BillCreatePayload } from "@/types/bill";
+import { createBill, withPdfType } from "./bills";
 
 const payload: BillCreatePayload = {
   account_number_raw: "ACC-123",

@@ -7,20 +7,14 @@ import { type DragEvent, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import Button from "@/components/Button";
 import { FormField, inputClass } from "@/components/Form-field/form-field";
-import {
-  type BillCreatePayload,
-  type BillDraftPayload,
-  createBill,
-  saveBillDraft,
-  updateBillDraft,
-  uploadInvoicePdf,
-} from "@/lib/api/bills";
+import { createBill, saveBillDraft, updateBillDraft, uploadInvoicePdf } from "@/lib/api/bills";
 import {
   accountStatuses,
   emptyInvoiceForm,
   type InvoiceFormValues,
   invoiceFormSchema,
 } from "@/lib/invoice-form-schema";
+import type { BillCreatePayload, BillDraftPayload } from "@/types/bill";
 
 type ActionStatus = "idle" | "loading" | "success" | "error";
 

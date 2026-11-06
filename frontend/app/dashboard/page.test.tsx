@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
-import { type DashboardBill, getDashboardBills } from "@/lib/api/bills";
+import { getDashboardBills } from "@/lib/api/bills";
+import type { DashboardBill } from "@/types/bill";
 import DashboardPage from "./page";
 
 jest.mock("@/components/Invoice-table/invoice-table", () => ({
@@ -69,9 +70,24 @@ describe("Dashboard", () => {
 
   it("totals outstanding bills and bills due today", async () => {
     mockGetDashboardBills.mockResolvedValue([
-      bill({ bill_id: "a", status: "pending_approval", amount: 100, due_date: isoDaysFromNow(0) }),
-      bill({ bill_id: "b", status: "approved", amount: 50.5, due_date: "2099-01-01" }),
-      bill({ bill_id: "c", status: "paid", amount: 999, due_date: isoDaysFromNow(0) }),
+      bill({
+        bill_id: "a",
+        status: "pending_approval",
+        amount: 100,
+        due_date: isoDaysFromNow(0),
+      }),
+      bill({
+        bill_id: "b",
+        status: "approved",
+        amount: 50.5,
+        due_date: "2099-01-01",
+      }),
+      bill({
+        bill_id: "c",
+        status: "paid",
+        amount: 999,
+        due_date: isoDaysFromNow(0),
+      }),
       bill({ bill_id: "d", status: "draft", amount: null, due_date: null }),
     ]);
     render(<DashboardPage />);

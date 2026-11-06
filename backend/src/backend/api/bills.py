@@ -15,6 +15,7 @@ from backend.schemas.bill import (
 from backend.schemas.user import UserSummary
 from backend.services.bill_repository import (
     create_draft,
+    get_editable_draft,
     list_user_bills,
     update_draft,
 )
@@ -112,3 +113,24 @@ def update_existing_draft(
         )
 
     return BillDraftRead.model_validate(updated)
+
+
+# retrieves an existing one
+@router.get("/{bill_id}/draft")
+def get_draft(
+    bill_id: UUID,
+    user_id: str = Depends(require_active_analyst),
+):
+    draft = get_editable_draft(
+        client=get_admin_supabase(),
+        bill_id=bill_id,
+        user_id=user_id,
+    )
+
+    if draft is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Editable draft not found.",
+        )
+
+    return draft
