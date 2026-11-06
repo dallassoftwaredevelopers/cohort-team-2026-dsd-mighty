@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { StatusBadge } from "@/components/Status-Badge/status-badge";
 import type { Invoice } from "@/types/invoice";
@@ -76,7 +77,12 @@ export function InvoiceTable({
                   className="text-foreground transition-colors hover:bg-surface-muted"
                 >
                   <td className="px-6 py-4 font-mono text-xs">
-                    {invoice.invoiceNumber ?? invoice.id.slice(0, 8)}
+                    <Link
+                      href={`/bills/${invoice.id}/edit`}
+                      className="text-blue-600 hover:underline"
+                    >
+                      {invoice.invoiceNumber ?? invoice.id.slice(0, 8)}
+                    </Link>
                   </td>
                   <td className="px-6 py-4">{invoice.property}</td>
                   <td className="px-6 py-4">{invoice.company}</td>
