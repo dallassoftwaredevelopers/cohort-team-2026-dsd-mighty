@@ -48,7 +48,7 @@ def get_editable_draft(
         .execute()
     )
 
-    return response.data if response else None
+    return response.data
 
 
 def attach_document(

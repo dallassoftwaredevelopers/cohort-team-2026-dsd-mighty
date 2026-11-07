@@ -121,11 +121,18 @@ def get_draft(
     bill_id: UUID,
     user_id: str = Depends(require_active_analyst),
 ):
+    print("Requested bill ID:", bill_id)
+    print("Authenticated backend user ID:", user_id)
+
+    client = get_admin_supabase()
+
     draft = get_editable_draft(
-        client=get_admin_supabase(),
+        client=client,
         bill_id=bill_id,
         user_id=user_id,
     )
+
+    print("Draft returned:", draft)
 
     if draft is None:
         raise HTTPException(

@@ -56,8 +56,8 @@ export function InvoiceForm() {
   const [draftMessage, setDraftMessage] = useState("");
   const [pdfStatus, setPdfStatus] = useState<ActionStatus>("idle");
   const [draftStatus, setDraftStatus] = useState<ActionStatus>("idle");
-  const params = useParams<{ billId?: string }>();
-  const draftId = params.billId ?? null;
+  const params = useParams<{ invoiceId?: string }>();
+  const draftId = params.invoiceId ?? null;
   const [createStatus, setCreateStatus] = useState<ActionStatus>("idle");
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
