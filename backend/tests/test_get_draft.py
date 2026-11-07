@@ -3,10 +3,10 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
-from backend.main import app
-from backend.routers import bills as bills_router  # adjust to your module path
 from fastapi.testclient import TestClient
 
+from backend.api import bills as bills_router  # adjust to your module path
+from backend.app import app
 from backend.auth import require_active_analyst
 
 USER_ID = "user-123"
@@ -77,7 +77,16 @@ def test_returns_404_when_no_editable_draft(client, monkeypatch):
 
     response = client.get(f"/bills/{uuid4()}/draft")
 
-    assert response.status_code == 404
+    # Temporary diagnostics: these run before the status check so they always show.
+    print("override registered:", require_active_analyst in app.dependency_overrides)
+    print("router module:", bills_router.get_draft.__module__)
+    print(
+        "app serves this router's get_draft:",
+        any(getattr(r, "endpoint", None) is bills_router.get_draft for r in app.routes),
+    )
+    print("response:", response.status_code, response.text)
+
+    assert response.status_code == 404, response.text
     assert response.json() == {"detail": "Editable draft not found."}
 
 

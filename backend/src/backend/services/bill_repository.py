@@ -48,6 +48,9 @@ def get_editable_draft(
         .execute()
     )
 
+    if response is None:
+        return None
+
     return response.data
 
 
