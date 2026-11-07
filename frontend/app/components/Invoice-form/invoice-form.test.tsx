@@ -5,11 +5,16 @@ import { accountStatuses } from "@/lib/invoice-form-schema";
 import { InvoiceForm } from "./invoice-form";
 
 const push = jest.fn();
-const replace = jest.fn();
-const mockUseParams = jest.fn();
+const mockUseParams = jest.fn((): { invoiceId?: string } => ({}));
+
+const mockReplace = jest.fn((path: string) => {
+  const invoiceId = path.split("/")[2];
+
+  mockUseParams.mockReturnValue({ invoiceId });
+});
 
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ push, replace }),
+  useRouter: () => ({ push, replace: mockReplace }),
   useParams: () => mockUseParams(),
 }));
 
@@ -40,13 +45,9 @@ function dropZone() {
 describe("InvoiceForm", () => {
   beforeEach(() => {
     push.mockClear();
-    replace.mockClear();
-    mockUseParams.mockReturnValue({ invoiceId: undefined });
-    jest.spyOn(console, "log").mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    jest.restoreAllMocks();
+    mockReplace.mockClear();
+    mockUseParams.mockReturnValue({});
+    mockGetBillDraft.mockReset().mockReturnValue(new Promise<never>(() => {}));
   });
 
   it("renders every field by its label", () => {
@@ -240,6 +241,7 @@ describe("InvoiceForm", () => {
       expect(mockSaveBillDraft.mock.calls[0][0]).toMatchObject({
         amount: "250.00",
       });
+      expect(mockReplace).toHaveBeenCalledWith("/invoices/bill-1/edit");
 
       const amount = screen.getByLabelText("Current Due");
       await user.clear(amount);
@@ -281,53 +283,49 @@ describe("InvoiceForm", () => {
       expect(screen.getByRole("button", { name: "Save Draft" })).toBeEnabled();
     });
   });
-});
 
-describe("Load Draft", () => {
-  beforeEach(() => {
-    mockGetBillDraft.mockReset();
-    mockUseParams.mockReturnValue({ invoiceId: "bill-1" });
-  });
-
-  it("loads an existing draft and populates the form", async () => {
-    mockGetBillDraft.mockResolvedValue({
-      bill_id: "bill-1",
-      status: "draft",
-      account_number_raw: "ACC-100",
-      invoice_number: "INV-2001",
-      vendor_name_raw: "Electric Company",
-      invoice_date: "2026-10-01",
-      due_date: "2026-11-01",
-      amount: "250.00",
-      prev_payments: "50.00",
-      description: "Monthly electricity",
-      processing_notes: "Pay online",
-      property_address: "123 Main Street",
-      account_status: "unpaid",
-      website_name: "electric.example.com",
-      document_path: null,
+  describe("Load Draft", () => {
+    beforeEach(() => {
+      mockUseParams.mockReturnValue({ invoiceId: "bill-1" });
     });
 
-    console.log("useParams called:", mockUseParams.mock.calls.length);
-    console.log("useParams results:", mockUseParams.mock.results);
+    it("loads an existing draft and populates the form", async () => {
+      mockGetBillDraft.mockResolvedValue({
+        bill_id: "bill-1",
+        status: "draft",
+        account_number_raw: "ACC-100",
+        invoice_number: "INV-2001",
+        vendor_name_raw: "Electric Company",
+        invoice_date: "2026-10-01",
+        due_date: "2026-11-01",
+        amount: "250.00",
+        prev_payments: "50.00",
+        description: "Monthly electricity",
+        processing_notes: "Pay online",
+        property_address: "123 Main Street",
+        account_status: "unpaid",
+        website_name: "electric.example.com",
+        document_path: null,
+      });
 
-    render(<InvoiceForm />);
+      render(<InvoiceForm />);
 
-    await waitFor(() => {
-      expect(mockGetBillDraft).toHaveBeenCalledWith("bill-1");
+      await waitFor(() => {
+        expect(mockGetBillDraft).toHaveBeenCalledWith("bill-1");
+      });
+
+      expect(await screen.findByDisplayValue("ACC-100")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("INV-2001")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("Electric Company")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("250.00")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("50.00")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("123 Main Street")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("Monthly electricity")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("Pay online")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("2026-10-01")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("2026-11-01")).toBeInTheDocument();
+      expect(screen.getByLabelText("Account Status")).toHaveValue("unpaid");
+      expect(screen.getByDisplayValue("electric.example.com")).toBeInTheDocument();
     });
-
-    expect(await screen.findByDisplayValue("ACC-100")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("INV-2001")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Electric Company")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("250.00")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("50.00")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("123 Main Street")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Monthly electricity")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Pay online")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("2026-10-01")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("2026-11-01")).toBeInTheDocument();
-    expect(screen.getByLabelText("Account Status")).toHaveValue("unpaid");
-    expect(screen.getByDisplayValue("electric.example.com")).toBeInTheDocument();
   });
 });
