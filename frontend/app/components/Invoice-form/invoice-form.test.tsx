@@ -231,6 +231,7 @@ describe("InvoiceForm", () => {
 
     it("creates the draft first, then updates the same bill on later saves", async () => {
       const user = userEvent.setup();
+      const replaceStateSpy = jest.spyOn(window.history, "replaceState");
       render(<InvoiceForm />);
 
       await user.type(screen.getByLabelText("Current Due"), "250.00");
@@ -241,7 +242,7 @@ describe("InvoiceForm", () => {
       expect(mockSaveBillDraft.mock.calls[0][0]).toMatchObject({
         amount: "250.00",
       });
-      expect(mockReplace).toHaveBeenCalledWith("/invoices/bill-1/edit");
+      expect(replaceStateSpy).toHaveBeenCalledWith(null, "", "/invoices/bill-1/edit");
 
       const amount = screen.getByLabelText("Current Due");
       await user.clear(amount);

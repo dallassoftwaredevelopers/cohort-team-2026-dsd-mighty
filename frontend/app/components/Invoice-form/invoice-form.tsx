@@ -18,6 +18,7 @@ import {
   accountStatuses,
   emptyInvoiceForm,
   type InvoiceFormValues,
+  invoiceDraftFormSchema,
   invoiceFormSchema,
 } from "@/lib/invoice-form-schema";
 import type { BillCreatePayload, BillDraftDetail, BillDraftPayload } from "@/types/bill";
@@ -112,10 +113,11 @@ export function InvoiceForm() {
     }
 
     let cancelled = false;
+    const currentDraftId = draftId;
 
     async function loadDraft() {
       try {
-        const draft = await getBillDraft(draftId!);
+        const draft = await getBillDraft(currentDraftId);
 
         if (cancelled) return;
 
@@ -210,21 +212,35 @@ export function InvoiceForm() {
     try {
       const values = getValues();
 
+      const validation = invoiceDraftFormSchema.safeParse(values);
+
+      console.log("Draft values:", values);
+      console.log("Draft validation:", validation);
+
+      if (!validation.success) {
+        console.log("Validation issues:", validation.error.issues);
+        setDraftStatus("error");
+        setSubmitError(validation.error.issues[0]?.message ?? "Please check your draft.");
+        return;
+      }
+
+      const draftValues = validation.data;
+
       // Blank fields are sent as null so that clearing a field on an
       // existing draft clears it in the database too.
       const payload: BillDraftPayload = {
-        account_number_raw: values.accountNumber.trim() || null,
-        invoice_number: values.statementId.trim() || null,
-        vendor_name_raw: values.companyName.trim() || null,
-        invoice_date: values.issueDate || null,
-        due_date: values.dueDate || null,
-        amount: values.currentDue.trim() || null,
-        prev_payments: values.previousPayments.trim() || null,
-        description: values.description.trim() || null,
-        processing_notes: values.notes.trim() || null,
-        property_address: values.propertyAddress.trim() || null,
-        account_status: values.accountStatus || null,
-        website_name: values.websiteName.trim() || null,
+        account_number_raw: draftValues.accountNumber || null,
+        invoice_number: draftValues.statementId || null,
+        vendor_name_raw: draftValues.companyName || null,
+        invoice_date: draftValues.issueDate || null,
+        due_date: draftValues.dueDate || null,
+        amount: draftValues.currentDue || null,
+        prev_payments: draftValues.previousPayments || null,
+        description: draftValues.description || null,
+        processing_notes: draftValues.notes || null,
+        property_address: draftValues.propertyAddress || null,
+        account_status: draftValues.accountStatus || null,
+        website_name: draftValues.websiteName || null,
       };
 
       // The first save creates the draft; later saves update the same bill.
@@ -254,6 +270,7 @@ export function InvoiceForm() {
         // Choosing a PDF is not a draft edit, so the file input is ignored.
         const target = event.target;
         if (target instanceof HTMLInputElement && target.type === "file") return;
+        setSubmitError("");
         if (draftStatus === "success") {
           setDraftStatus("idle");
           setDraftMessage("");
@@ -279,7 +296,9 @@ export function InvoiceForm() {
         </p>
       )}
       <div className="flex items-center justify-between gap-4">
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground">New Invoice</h1>
+        <h1 className="text-3xl font-semibold tracking-tight text-foreground">
+          {draftId ? "Edit Draft" : "New Invoice"}
+        </h1>
 
         <div className="flex items-center gap-3">
           <Button
