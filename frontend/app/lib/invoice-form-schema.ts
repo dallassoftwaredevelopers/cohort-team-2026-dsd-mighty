@@ -19,8 +19,8 @@ export const invoiceFormSchema = z
     statementId: z.string().trim().min(1, "Statement # is required"),
     companyName: z.string().trim().min(1, "Customer / business name is required"),
     propertyAddress: z.string().trim().min(1, "Property address is required"),
-    issueDate: z.string().refine(isValidIsoDate, "Enter a valid issue date"),
-    dueDate: z.string().refine(isValidIsoDate, "Enter a valid due date"),
+    issueDate: z.string().regex(isoDate, "Issue date is required"),
+    dueDate: z.string().regex(isoDate, "Due date is required"),
     description: z.string().trim().min(1, "Add a short description"),
     previousPayments: z
       .string()

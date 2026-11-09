@@ -60,6 +60,9 @@ export function InvoiceForm() {
   const params = useParams<{ invoiceId?: string }>();
 
   const [draftId, setDraftId] = useState<string | null>(params.invoiceId ?? null);
+  const [isLoadingDraft, setIsLoadingDraft] = useState(Boolean(params.invoiceId));
+  const [draftLoadError, setDraftLoadError] = useState<string | null>(null);
+
   const [createStatus, setCreateStatus] = useState<ActionStatus>("idle");
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -107,17 +110,19 @@ export function InvoiceForm() {
     }
   }
 
+  const routeInvoiceId = params.invoiceId;
+
   useEffect(() => {
-    if (!draftId) {
-      return;
-    }
+    if (!routeInvoiceId) return;
 
     let cancelled = false;
-    const currentDraftId = draftId;
 
     async function loadDraft() {
+      setIsLoadingDraft(true);
+      setDraftLoadError(null);
+
       try {
-        const draft = await getBillDraft(currentDraftId);
+        const draft = await getBillDraft(routeInvoiceId);
 
         if (cancelled) return;
 
@@ -125,9 +130,13 @@ export function InvoiceForm() {
       } catch (err) {
         if (cancelled) return;
 
-        setSubmitError(
+        setDraftLoadError(
           err instanceof Error ? err.message : "Unable to load the draft. Please try again.",
         );
+      } finally {
+        if (!cancelled) {
+          setIsLoadingDraft(false);
+        }
       }
     }
 
@@ -136,7 +145,7 @@ export function InvoiceForm() {
     return () => {
       cancelled = true;
     };
-  }, [draftId, reset]);
+  }, [routeInvoiceId, reset]);
 
   // Shared by the file picker and drag-and-drop: a new file always resets
   // validation so a previous success never carries over to it.
@@ -256,6 +265,20 @@ export function InvoiceForm() {
       setDraftStatus("error");
       setSubmitError(error instanceof Error ? error.message : "Unable to save draft.");
     }
+  }
+
+  if (isLoadingDraft) {
+    return (
+      <p className="mx-auto max-w-3xl py-16 text-center text-foreground-muted">Loading draft...</p>
+    );
+  }
+
+  if (draftLoadError) {
+    return (
+      <p role="alert" className="mx-auto max-w-3xl py-16 text-center text-red-600">
+        {draftLoadError}
+      </p>
+    );
   }
 
   return (
