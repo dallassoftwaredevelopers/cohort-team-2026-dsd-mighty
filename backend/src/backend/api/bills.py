@@ -117,28 +117,21 @@ def update_existing_draft(
 
 
 # retrieves an existing one
-@router.get("/{bill_id}/draft")
+@router.get("/{bill_id}/draft", response_model=BillDraftRead)
 def get_draft(
     bill_id: UUID,
-    user_id: str = Depends(require_active_analyst),
-):
-    print("Requested bill ID:", bill_id)
-    print("Authenticated backend user ID:", user_id)
-
-    client = get_admin_supabase()
-
+    user: CurrentUser = Depends(require_active(*BILL_WRITERS)),
+) -> BillDraftRead:
     draft = get_editable_draft(
-        client=client,
+        client=get_admin_supabase(),
         bill_id=bill_id,
-        user_id=user_id,
+        user_id=str(user.id),
     )
-
-    print("Draft returned:", draft)
 
     if draft is None:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Editable draft not found.",
         )
 
-    return draft
+    return BillDraftRead.model_validate(draft)

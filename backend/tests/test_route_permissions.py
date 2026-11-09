@@ -29,6 +29,7 @@ PDF = ("invoice.pdf", b"%PDF-1.4\nsample", "application/pdf")
 ROLE_TABLE = [
     ("GET", "/bills/dashboard", {ANALYST, APPROVER, ADMIN}, 200),
     ("POST", "/bills/drafts", {ANALYST, ADMIN}, 201),
+    ("GET", "/bills/{bill_id}/draft", {ANALYST, ADMIN}, 200),
     ("PATCH", "/bills/{bill_id}/draft", {ANALYST, ADMIN}, 200),
     ("POST", "/bills/{bill_id}/document", {ANALYST, ADMIN}, 201),
 ]

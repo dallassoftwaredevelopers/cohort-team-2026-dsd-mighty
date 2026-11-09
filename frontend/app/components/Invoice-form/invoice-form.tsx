@@ -57,7 +57,8 @@ export function InvoiceForm() {
   const [pdfStatus, setPdfStatus] = useState<ActionStatus>("idle");
   const [draftStatus, setDraftStatus] = useState<ActionStatus>("idle");
   const params = useParams<{ invoiceId?: string }>();
-  const draftId = params.invoiceId ?? null;
+
+  const [draftId, setDraftId] = useState<string | null>(params.invoiceId ?? null);
   const [createStatus, setCreateStatus] = useState<ActionStatus>("idle");
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -232,8 +233,11 @@ export function InvoiceForm() {
         : await saveBillDraft(payload);
 
       if (!draftId) {
-        router.replace(`/invoices/${saved.bill_id}/edit`);
+        setDraftId(saved.bill_id);
+
+        window.history.replaceState(null, "", `/invoices/${saved.bill_id}/edit`);
       }
+
       setDraftStatus("success");
       setDraftMessage(`Draft saved successfully: ${saved.bill_id}`);
     } catch (error) {

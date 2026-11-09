@@ -77,15 +77,6 @@ def test_returns_404_when_no_editable_draft(client, monkeypatch):
 
     response = client.get(f"/bills/{uuid4()}/draft")
 
-    # Temporary diagnostics: these run before the status check so they always show.
-    print("override registered:", require_active_analyst in app.dependency_overrides)
-    print("router module:", bills_router.get_draft.__module__)
-    print(
-        "app serves this router's get_draft:",
-        any(getattr(r, "endpoint", None) is bills_router.get_draft for r in app.routes),
-    )
-    print("response:", response.status_code, response.text)
-
     assert response.status_code == 404, response.text
     assert response.json() == {"detail": "Editable draft not found."}
 
