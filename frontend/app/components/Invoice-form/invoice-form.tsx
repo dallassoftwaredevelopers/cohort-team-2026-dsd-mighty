@@ -57,8 +57,8 @@ export function InvoiceForm() {
   const [draftMessage, setDraftMessage] = useState("");
   const [pdfStatus, setPdfStatus] = useState<ActionStatus>("idle");
   const [draftStatus, setDraftStatus] = useState<ActionStatus>("idle");
-  const params = useParams<{ invoiceId?: string }>();
-
+  const params = useParams<{ invoiceId: string }>();
+  const routeInvoiceId = params.invoiceId;
   const [draftId, setDraftId] = useState<string | null>(params.invoiceId ?? null);
   const [isLoadingDraft, setIsLoadingDraft] = useState(Boolean(params.invoiceId));
   const [draftLoadError, setDraftLoadError] = useState<string | null>(null);
@@ -110,10 +110,11 @@ export function InvoiceForm() {
     }
   }
 
-  const routeInvoiceId = params.invoiceId;
-
   useEffect(() => {
-    if (!routeInvoiceId) return;
+    if (!routeInvoiceId) {
+      setIsLoadingDraft(false);
+      return;
+    }
 
     let cancelled = false;
 
