@@ -1,5 +1,13 @@
 import type { BillCreatePayload, BillDraftPayload } from "@/types/bill";
-import { createBill, getBillDraft, saveBillDraft, updateBillDraft, withPdfType, getDashboardBills, uploadInvoicePdf, withPdfType } from "./bills";
+import {
+  createBill,
+  getBillDraft,
+  getDashboardBills,
+  saveBillDraft,
+  updateBillDraft,
+  uploadInvoicePdf,
+  withPdfType,
+} from "./bills";
 
 const mockGetSession = jest.fn();
 
@@ -70,6 +78,10 @@ function nonJsonResponse(status: number) {
   };
 }
 
+function signedOut() {
+  mockGetSession.mockResolvedValue({ data: { session: null }, error: null });
+}
+
 const fetchMock = jest.fn();
 const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
 
@@ -94,38 +106,13 @@ afterEach(() => {
 });
 
 describe("createBill", () => {
-  beforeEach(() => {
-    process.env.NEXT_PUBLIC_API_URL = "http://api.test";
-    global.fetch = fetchMock as unknown as typeof fetch;
-const fetchMock = jest.fn();
-const originalApiUrl = process.env.NEXT_PUBLIC_API_URL;
-
-beforeEach(() => {
-  process.env.NEXT_PUBLIC_API_URL = "http://api.test";
-  global.fetch = fetchMock as unknown as typeof fetch;
-  mockGetSession.mockResolvedValue({
-    data: { session: { access_token: "token-123" } },
-    error: null,
-  });
-});
-
-afterEach(() => {
-  fetchMock.mockReset();
-  mockGetSession.mockReset();
-  process.env.NEXT_PUBLIC_API_URL = originalApiUrl;
-});
-
-function signedOut() {
-  mockGetSession.mockResolvedValue({ data: { session: null }, error: null });
-}
-
-describe("createBill", () => {
-  it("POSTs the payload to /bills and returs successful", async () => {
+  it("POSTs the payload to /bills and returns the saved bill", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 201,
       json: async () => savedBill,
     });
+
     const result = await createBill(payload);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -133,12 +120,14 @@ describe("createBill", () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(payload);
     expect(result).toEqual(savedBill);
   });
-  it("throws the server detail message on an HTTP Error", async () => {
+
+  it("throws the server detail message on an HTTP error", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: false,
       status: 404,
       json: async () => ({ detail: "Bill not found." }),
     });
+
     await expect(createBill(payload)).rejects.toThrow("Bill not found.");
   });
 
@@ -164,7 +153,7 @@ describe("uploadInvoicePdf", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("http://api.test/bills/b1/document");
     expect(init.method).toBe("POST");
-    expect(init.headers).toEqual({ Authorization: "Bearer token-123" });
+    expect(init.headers).toEqual({ Authorization: "Bearer test-token" });
     expect((init.body as FormData).get("file")).toBeInstanceOf(File);
   });
 
@@ -175,49 +164,6 @@ describe("uploadInvoicePdf", () => {
     await expect(uploadInvoicePdf(file, "b1")).rejects.toThrow(
       "You must be signed in to upload a PDF.",
     );
-  });
-});
-
-describe("saveBillDraft", () => {
-  it("POSTs the draft as JSON with the user's token", async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 201,
-      json: async () => ({ bill_id: "b1", status: "draft", document_path: null }),
-    });
-
-    await saveBillDraft({ invoice_number: "INV-1" });
-
-    expect(fetchMock).toHaveBeenCalledWith("http://api.test/bills/drafts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer token-123" },
-      body: JSON.stringify({ invoice_number: "INV-1" }),
-    });
-  });
-
-  it("falls back to its own message when the error has no detail", async () => {
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) });
-
-    await expect(saveBillDraft({})).rejects.toThrow("Unable to save draft (500)");
-  });
-});
-
-describe("getDashboardBills", () => {
-  it("GETs /bills/dashboard uncached with the user's token", async () => {
-    fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => [] });
-
-    await expect(getDashboardBills()).resolves.toEqual([]);
-    expect(fetchMock).toHaveBeenCalledWith("http://api.test/bills/dashboard", {
-      method: "GET",
-      cache: "no-store",
-      headers: { Authorization: "Bearer token-123" },
-    });
-  });
-
-  it("asks the user to sign in when there is no session", async () => {
-    signedOut();
-
-    await expect(getDashboardBills()).rejects.toThrow("You must be signed in to view invoices.");
   });
 });
 
@@ -270,6 +216,12 @@ describe("saveBillDraft", () => {
     expect(body).toHaveProperty("prev_payments", null);
     expect(body).toHaveProperty("website_name", null);
   });
+
+  it("falls back to its own message when the error has no detail", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) });
+
+    await expect(saveBillDraft(draftPayload)).rejects.toThrow("Unable to save draft (500)");
+  });
 });
 
 describe("updateBillDraft", () => {
@@ -296,7 +248,7 @@ describe.each([
   ["updateBillDraft", () => updateBillDraft("bill-1", draftPayload)],
 ] as const)("%s error handling", (_name, call) => {
   it("requires a session and never calls the backend without one", async () => {
-    mockGetSession.mockResolvedValue({ data: { session: null }, error: null });
+    signedOut();
 
     await expect(call()).rejects.toThrow("You must be signed in to save a draft.");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -320,12 +272,6 @@ describe.each([
 
     await expect(call()).rejects.toThrow("You must be signed in to save a draft.");
     expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("reports an unreachable backend when fetch rejects", async () => {
-    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
-
-    await expect(call()).rejects.toThrow("Unable to reach the backend");
   });
 
   it("throws a string detail from the server as-is", async () => {
@@ -377,6 +323,25 @@ describe.each([
   });
 });
 
+describe("getDashboardBills", () => {
+  it("GETs /bills/dashboard uncached with the user's token", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200, json: async () => [] });
+
+    await expect(getDashboardBills()).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith("http://api.test/bills/dashboard", {
+      method: "GET",
+      cache: "no-store",
+      headers: { Authorization: "Bearer test-token" },
+    });
+  });
+
+  it("asks the user to sign in when there is no session", async () => {
+    signedOut();
+
+    await expect(getDashboardBills()).rejects.toThrow("You must be signed in to view invoices.");
+  });
+});
+
 describe("getBillDraft", () => {
   it("GETs /bills/:id/draft with the bearer token and no caching", async () => {
     const detail = { ...savedDraft, amount: "250.00", account_number_raw: "ACC-123" };
@@ -393,7 +358,7 @@ describe("getBillDraft", () => {
   });
 
   it("requires a session", async () => {
-    mockGetSession.mockResolvedValue({ data: { session: null }, error: null });
+    signedOut();
 
     await expect(getBillDraft("bill-1")).rejects.toThrow("You must be signed in to view a draft.");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -402,7 +367,9 @@ describe("getBillDraft", () => {
   it("reports an unreachable backend when fetch rejects", async () => {
     fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
 
-    await expect(getBillDraft("bill-1")).rejects.toThrow("Unable to reach the backend");
+    await expect(getBillDraft("bill-1")).rejects.toThrow(
+      "Unable to reach the server. It may be down or had an error - try again in a moment.",
+    );
   });
 
   it("throws the server detail on a 404", async () => {

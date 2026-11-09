@@ -214,11 +214,7 @@ export function InvoiceForm() {
 
       const validation = invoiceDraftFormSchema.safeParse(values);
 
-      console.log("Draft values:", values);
-      console.log("Draft validation:", validation);
-
       if (!validation.success) {
-        console.log("Validation issues:", validation.error.issues);
         setDraftStatus("error");
         setSubmitError(validation.error.issues[0]?.message ?? "Please check your draft.");
         return;

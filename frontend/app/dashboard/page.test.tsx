@@ -94,7 +94,10 @@ describe("Dashboard", () => {
     account(false);
     rerender(<DashboardPage />);
 
-    expect(await screen.findByTestId("invoice-table")).toHaveAttribute("data-count", "1");
+    expect(await screen.findByTestId("invoice-table-Invoice History")).toHaveAttribute(
+      "data-count",
+      "1",
+    );
     expect(mockGetDashboardBills).toHaveBeenCalledTimes(1);
   });
 

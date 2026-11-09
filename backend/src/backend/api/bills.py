@@ -8,6 +8,7 @@ from backend.schemas.bill import (
     BillCreate,
     BillDashboardRow,
     BillDraftCreate,
+    BillDraftDetail,
     BillDraftRead,
     BillRead,
     BillStatus,
@@ -117,11 +118,11 @@ def update_existing_draft(
 
 
 # retrieves an existing one
-@router.get("/{bill_id}/draft", response_model=BillDraftRead)
+@router.get("/{bill_id}/draft", response_model=BillDraftDetail)
 def get_draft(
     bill_id: UUID,
     user: CurrentUser = Depends(require_active(*BILL_WRITERS)),
-) -> BillDraftRead:
+) -> BillDraftDetail:
     draft = get_editable_draft(
         client=get_admin_supabase(),
         bill_id=bill_id,
@@ -134,4 +135,4 @@ def get_draft(
             detail="Editable draft not found.",
         )
 
-    return BillDraftRead.model_validate(draft)
+    return BillDraftDetail.model_validate(draft)

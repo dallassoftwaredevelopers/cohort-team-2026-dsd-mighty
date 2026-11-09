@@ -7,16 +7,33 @@ from fastapi.testclient import TestClient
 
 from backend.api import bills as bills_router  # adjust to your module path
 from backend.app import app
-from backend.auth import require_active_analyst
+from backend.auth import CurrentUser, get_current_user
+from backend.schemas.user import UserRole
 
-USER_ID = "user-123"
 FAKE_DB = object()
 
 
+def make_user(role=UserRole.analyst, status="active") -> CurrentUser:
+    return CurrentUser(
+        id=uuid4(),
+        email="analyst@example.com",
+        full_name="Test Analyst",
+        role=role,
+        status=status,
+    )
+
+
 @pytest.fixture
-def client(monkeypatch):
-    # Skip real token checking and pretend this analyst is signed in.
-    app.dependency_overrides[require_active_analyst] = lambda: USER_ID
+def user():
+    return make_user()
+
+
+@pytest.fixture
+def client(monkeypatch, user):
+    # Skip the Supabase token check and pretend this user is signed in.
+    # require_active(...) still runs on top of this user, so the real
+    # status/role logic is exercised.
+    app.dependency_overrides[get_current_user] = lambda: user
     # Patch the names as the router imported them, not where they're defined.
     monkeypatch.setattr(bills_router, "get_admin_supabase", lambda: FAKE_DB)
 
@@ -31,7 +48,7 @@ def patch_repo(monkeypatch, return_value):
     return mock
 
 
-def test_returns_the_draft(client, monkeypatch):
+def test_returns_the_draft(client, monkeypatch, user):
     bill_id = uuid4()
     draft = {
         "bill_id": str(bill_id),
@@ -46,8 +63,9 @@ def test_returns_the_draft(client, monkeypatch):
     response = client.get(f"/bills/{bill_id}/draft")
 
     assert response.status_code == 200
-    assert response.json() == draft
-    repo.assert_called_once_with(client=FAKE_DB, bill_id=bill_id, user_id=USER_ID)
+    body = response.json()
+    assert {key: body[key] for key in draft} == draft
+    repo.assert_called_once_with(client=FAKE_DB, bill_id=bill_id, user_id=str(user.id))
 
 
 def test_returns_a_partial_draft_with_nulls_intact(client, monkeypatch):
@@ -91,10 +109,28 @@ def test_rejects_a_malformed_bill_id(client, monkeypatch):
 
 
 def test_requires_authentication(monkeypatch):
-    # No dependency override here, so the real auth runs.
+    # No dependency override here, so the real get_current_user runs. With no
+    # Authorization header it returns 401 before it ever calls Supabase.
     repo = patch_repo(monkeypatch, {"bill_id": "x"})
 
     response = TestClient(app).get(f"/bills/{uuid4()}/draft")
 
-    assert response.status_code in (401, 403)
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+    repo.assert_not_called()
+
+
+def test_rejects_an_account_that_is_not_active_yet(monkeypatch):
+    # New: the old override skipped this check entirely.
+    app.dependency_overrides[get_current_user] = lambda: make_user(status="inactive")
+    monkeypatch.setattr(bills_router, "get_admin_supabase", lambda: FAKE_DB)
+    repo = patch_repo(monkeypatch, {"bill_id": "x"})
+
+    try:
+        response = TestClient(app).get(f"/bills/{uuid4()}/draft")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Your account is waiting for approval."}
     repo.assert_not_called()

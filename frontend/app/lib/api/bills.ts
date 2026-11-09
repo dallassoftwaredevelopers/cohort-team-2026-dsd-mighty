@@ -1,5 +1,3 @@
-import { createClient } from "@/lib/supabase/client";
-import { apiRequest } from "./http";
 import type {
   Bill,
   BillCreatePayload,
@@ -9,6 +7,7 @@ import type {
   DashboardBill,
   DocumentUploadResponse,
 } from "@/types/bill";
+import { apiRequest } from "./http";
 
 // Read per request, not at import: a module-level throw breaks every
 // importer (including tests) whenever the variable is unset.
@@ -64,70 +63,17 @@ export function uploadInvoicePdf(file: File, billId: string): Promise<DocumentUp
   );
 }
 
-// FastAPI returns `detail` as a string for HTTPException and as a list
-// of field errors for request validation (422).
-function errorDetail(body: unknown): string | null {
-  const detail = (body as { detail?: unknown } | null)?.detail;
-
-  if (typeof detail === "string") return detail;
-
-  if (Array.isArray(detail)) {
-    const messages = detail
-      .map((item: { loc?: unknown[]; msg?: string }) => {
-        const field = item.loc?.at(-1);
-
-        return item.msg ? (field ? `${String(field)}: ${item.msg}` : item.msg) : null;
-      })
-      .filter(Boolean);
-
-    if (messages.length) return messages.join("; ");
-  }
-
-  return null;
-}
-
-async function sendDraft(
+function sendDraft(
   method: "POST" | "PATCH",
   path: string,
   payload: BillDraftPayload,
 ): Promise<BillDraftResponse> {
-  const supabase = createClient();
-
-  const {
-    data: { session },
-    error: sessionError,
-  } = await supabase.auth.getSession();
-
-  if (sessionError || !session?.access_token) {
-    throw new Error("You must be signed in to save a draft.");
-  }
-
-  const url = `${apiUrl()}${path}`;
-
-  let response: Response;
-
-  try {
-    response = await fetch(url, {
   return apiRequest<BillDraftResponse>(
     path,
     {
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-    });
-  } catch {
-    throw new Error(
-      "Unable to reach the backend. It may be down or returned a server error. Check the backend logs.",
-    );
-  }
-
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-
-    throw new Error(errorDetail(body) ?? `Unable to save draft (${response.status})`);
-  }
-
-  return response.json();
     },
     { signedOut: "You must be signed in to save a draft.", failed: "Unable to save draft" },
   );
@@ -144,50 +90,6 @@ export function updateBillDraft(
   return sendDraft("PATCH", `/bills/${billId}/draft`, payload);
 }
 
-export async function getDashboardBills(): Promise<DashboardBill[]> {
-  const supabase = createClient();
-
-  const {
-    data: { session },
-    error: sessionError,
-  } = await supabase.auth.getSession();
-
-  if (sessionError || !session?.access_token) {
-    throw new Error("You must be signed in to view invoices.");
-  }
-
-  const response = await fetch(`${apiUrl()}/bills/dashboard`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-    },
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => null);
-
-    throw new Error(
-      typeof error?.detail === "string"
-        ? error.detail
-        : `Unable to load invoices (${response.status})`,
-    );
-  }
-
-  return response.json();
-export type DashboardBill = {
-  bill_id: string;
-  invoice_number: string | null;
-  property_address: string | null;
-  vendor_name_raw: string | null;
-  invoice_date: string | null;
-  due_date: string | null;
-  amount: number | null;
-  status: BillStatus;
-  document_path: string | null;
-  created_at: string;
-};
-
 export function getDashboardBills(): Promise<DashboardBill[]> {
   return apiRequest<DashboardBill[]>(
     "/bills/dashboard",
@@ -196,39 +98,10 @@ export function getDashboardBills(): Promise<DashboardBill[]> {
   );
 }
 
-export async function getBillDraft(billId: string): Promise<BillDraftDetail> {
-  const supabase = createClient();
-
-  const {
-    data: { session },
-    error: sessionError,
-  } = await supabase.auth.getSession();
-
-  if (sessionError || !session?.access_token) {
-    throw new Error("You must be signed in to view a draft.");
-  }
-
-  let response: Response;
-
-  try {
-    response = await fetch(`${apiUrl()}/bills/${billId}/draft`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      cache: "no-store",
-    });
-  } catch {
-    throw new Error(
-      "Unable to reach the backend. It may be down or returned a server error. Check the backend logs.",
-    );
-  }
-
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-
-    throw new Error(errorDetail(body) ?? `Unable to load draft (${response.status})`);
-  }
-
-  return response.json();
+export function getBillDraft(billId: string): Promise<BillDraftDetail> {
+  return apiRequest<BillDraftDetail>(
+    `/bills/${billId}/draft`,
+    { method: "GET", cache: "no-store" },
+    { signedOut: "You must be signed in to view a draft.", failed: "Unable to load draft" },
+  );
 }
