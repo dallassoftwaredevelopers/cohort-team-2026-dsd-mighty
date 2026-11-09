@@ -88,6 +88,7 @@ class BillDraftRead(BaseModel):
 
 
 class BillDraftDetail(BillDraftCreate):
+    model_config = ConfigDict(extra="ignore")
     bill_id: UUID
     status: BillStatus
     document_path: str | None = None
