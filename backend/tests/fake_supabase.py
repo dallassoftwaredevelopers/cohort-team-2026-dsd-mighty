@@ -19,9 +19,18 @@ class _Result:
         self.data = data
 
 
+def _insert_defaults(table: str) -> dict[str, Any]:
+    """The column defaults Postgres fills in on insert, per table."""
+    now = datetime.now(UTC).isoformat()
+    if table == "vendors":
+        return {"vendor_id": str(uuid4()), "created_at": now}
+    return {"bill_id": str(uuid4()), "document_path": None, "created_at": now}
+
+
 class _Query:
-    def __init__(self, rows: list[dict[str, Any]]) -> None:
+    def __init__(self, rows: list[dict[str, Any]], table: str) -> None:
         self._rows = rows
+        self._table = table
         self._op = "select"
         self._payload: dict[str, Any] | None = None
         self._filters: list[tuple[str, Any]] = []
@@ -70,12 +79,7 @@ class _Query:
 
     def execute(self) -> _Result | None:
         if self._op == "insert":
-            row = {
-                "bill_id": str(uuid4()),
-                "document_path": None,
-                "created_at": datetime.now(UTC).isoformat(),
-                **(self._payload or {}),
-            }
+            row = {**_insert_defaults(self._table), **(self._payload or {})}
             self._rows.append(row)
             rows = [row]
         else:
@@ -130,7 +134,7 @@ class FakeSupabase:
         self.storage = _Storage()
 
     def table(self, name: str) -> _Query:
-        return _Query(self.tables.setdefault(name, []))
+        return _Query(self.tables.setdefault(name, []), name)
 
     def add_bill(self, submitted_by: str, **fields: Any) -> dict[str, Any]:
         row = {
@@ -142,4 +146,17 @@ class FakeSupabase:
             **fields,
         }
         self.table("bills")._rows.append(row)
+        return row
+
+    def add_vendor(self, vendor_name: str, **fields: Any) -> dict[str, Any]:
+        row = {
+            "vendor_id": str(uuid4()),
+            "vendor_name": vendor_name,
+            "contact_email": None,
+            "contact_phone": None,
+            "default_payment_method": None,
+            "created_at": datetime.now(UTC).isoformat(),
+            **fields,
+        }
+        self.table("vendors")._rows.append(row)
         return row
