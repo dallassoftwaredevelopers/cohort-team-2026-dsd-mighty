@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { apiRequest } from "./http";
 import type {
   Bill,
   BillCreatePayload,
@@ -52,41 +53,15 @@ export function withPdfType(file: File): File {
   return file.type ? file : new File([file], file.name, { type: "application/pdf" });
 }
 
-export async function uploadInvoicePdf(
-  file: File,
-  billId: string,
-): Promise<DocumentUploadResponse> {
-  const supabase = createClient();
-
-  const {
-    data: { session },
-    error: sessionError,
-  } = await supabase.auth.getSession();
-
-  if (sessionError || !session?.access_token) {
-    throw new Error("You must be signed in to upload a PDF.");
-  }
-
+export function uploadInvoicePdf(file: File, billId: string): Promise<DocumentUploadResponse> {
   const formData = new FormData();
   formData.append("file", withPdfType(file));
 
-  const response = await fetch(`${apiUrl()}/bills/${billId}/document`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-    },
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => null);
-
-    throw new Error(
-      typeof error?.detail === "string" ? error.detail : `Upload failed (${response.status})`,
-    );
-  }
-
-  return response.json();
+  return apiRequest<DocumentUploadResponse>(
+    `/bills/${billId}/document`,
+    { method: "POST", body: formData },
+    { signedOut: "You must be signed in to upload a PDF.", failed: "Upload failed" },
+  );
 }
 
 // FastAPI returns `detail` as a string for HTTPException and as a list
@@ -133,11 +108,11 @@ async function sendDraft(
 
   try {
     response = await fetch(url, {
+  return apiRequest<BillDraftResponse>(
+    path,
+    {
       method,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.access_token}`,
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
   } catch {
@@ -153,6 +128,9 @@ async function sendDraft(
   }
 
   return response.json();
+    },
+    { signedOut: "You must be signed in to save a draft.", failed: "Unable to save draft" },
+  );
 }
 
 export function saveBillDraft(payload: BillDraftPayload): Promise<BillDraftResponse> {
@@ -197,6 +175,25 @@ export async function getDashboardBills(): Promise<DashboardBill[]> {
   }
 
   return response.json();
+export type DashboardBill = {
+  bill_id: string;
+  invoice_number: string | null;
+  property_address: string | null;
+  vendor_name_raw: string | null;
+  invoice_date: string | null;
+  due_date: string | null;
+  amount: number | null;
+  status: BillStatus;
+  document_path: string | null;
+  created_at: string;
+};
+
+export function getDashboardBills(): Promise<DashboardBill[]> {
+  return apiRequest<DashboardBill[]>(
+    "/bills/dashboard",
+    { method: "GET", cache: "no-store" },
+    { signedOut: "You must be signed in to view invoices.", failed: "Unable to load invoices" },
+  );
 }
 
 export async function getBillDraft(billId: string): Promise<BillDraftDetail> {

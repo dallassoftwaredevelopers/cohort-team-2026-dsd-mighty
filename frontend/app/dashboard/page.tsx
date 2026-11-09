@@ -4,6 +4,7 @@ import { Plus } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { useAuth } from "@/auth/AuthProvider";
 import { InvoiceTable } from "@/components/Invoice-table/invoice-table";
 import { StatCard } from "@/components/Stat-card/stat-card";
 import { getDashboardBills } from "@/lib/api/bills";
@@ -41,6 +42,10 @@ function thisWeek(today: Date): DateRange {
 }
 
 export default function DashboardPage() {
+  const { profile, loading: accountLoading } = useAuth();
+  // Wait for /me: an inactive user gets the waiting screen instead, and their
+  // bill request would only be refused.
+  const canLoad = !accountLoading && profile?.status !== "inactive";
   const [bills, setBills] = useState<DashboardBill[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +54,7 @@ export default function DashboardPage() {
   const [week, setWeek] = useState<DateRange | null>(null);
 
   useEffect(() => {
+    if (!canLoad) return;
     let cancelled = false;
 
     async function loadInvoices() {
@@ -76,7 +82,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [canLoad]);
 
   const currency = new Intl.NumberFormat("en-US", {
     style: "currency",
