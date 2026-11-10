@@ -20,6 +20,13 @@ BEARER_CHALLENGE = {"WWW-Authenticate": "Bearer"}
 BILL_READERS = (UserRole.analyst, UserRole.approver, UserRole.admin)
 BILL_WRITERS = (UserRole.analyst, UserRole.admin)
 
+# Who may use the vendor routes: everyone reads, only admins add or change.
+VENDOR_READERS = (UserRole.analyst, UserRole.approver, UserRole.admin)
+VENDOR_WRITERS = (UserRole.admin,)
+
+USER_READERS = (UserRole.admin,)
+USER_EDITORS = (UserRole.admin,)
+
 
 class CurrentUser(MeRead):
     """The signed-in caller: the same fields `GET /me` returns."""
