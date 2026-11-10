@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/client";
 import type { Profile } from "@/types/user";
+import { apiRequest } from "./http";
 
 function apiUrl(): string {
   const url = process.env.NEXT_PUBLIC_API_URL;
@@ -8,6 +9,18 @@ function apiUrl(): string {
   }
   return url;
 }
+
+export function listUsers(): Promise<Profile[]> {
+  return apiRequest<Profile[]>(
+    "/admin/users",
+    { method: "GET" },
+    {
+      signedOut: "You must be signed in to view users.",
+      failed: "Unable to load users",
+    },
+  );
+}
+
 export async function getAppUsers(): Promise<Profile[]> {
   const supabase = createClient();
 

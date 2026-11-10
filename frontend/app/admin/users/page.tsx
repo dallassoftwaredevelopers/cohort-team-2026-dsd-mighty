@@ -1,84 +1,91 @@
 "use client";
-
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import ConfirmModal from "@/components/ConfirmModal/ConfirmModal";
-import { getAppUsers } from "@/lib/api/users";
-import { type RuleErrors, validateRules } from "@/lib/validation";
+import { useAuth } from "@/auth/AuthProvider";
+import { DataTable, type DataTableColumn } from "@/components/DataTable/DataTable";
+import { StatusBadge } from "@/components/Status-Badge/status-badge";
+import { listUsers } from "@/lib/api/users";
 import type { Profile } from "@/types/user";
 
 const COPY = {
   sectionTitle: "All Users",
-  invoiceMaximum: "Invoice Maximum",
-  invoiceMaximumTooltip: "The largest invoice that does not need admin intervention.",
-  minApprovals: "Minimum Approvals Needed",
-  minApprovalsTooltip: "How many approvals an invoice needs before it is approved.",
-  save: "Save",
-  saved: "Rules saved.",
-  confirmTitle: "Save approval rules?",
-  confirmLabel: "Save changes",
-  confirmIntro: "This changes how invoices get approved for your company:",
-  summaryInvoiceMax: "Invoice maximum",
-  summaryMinApprovals: "Minimum approvals",
-  invoiceMaximumHint: "Numbers only, up to 2 decimal places (e.g. 5000.50).",
-  minApprovalsHint: "Whole numbers only. Must be at least 1.",
+  loading: "Loading profiles...",
+  empty: "No profiles yet.",
+  loadFailed: "Unable to load profiles.",
+  notSet: "—",
 };
+const columns: DataTableColumn<Profile>[] = [
+  {
+    header: "id",
+    cell: (profile) => (
+      <Link className="text-blue-600 hover:underline" href={`/admin/user/${profile.user_id}/edit`}>
+        {profile.user_id.slice(0, 8)}{" "}
+      </Link>
+    ),
+  },
+  { header: "Name", cell: (profile) => profile.full_name ?? COPY.notSet },
+  { header: "Email", cell: (profile) => profile.email ?? COPY.notSet },
+  { header: "Role", cell: (profile) => profile.role ?? COPY.notSet },
+
+  {
+    header: "Status",
+    cell: (profile) => <StatusBadge status={profile.status} />,
+  },
+];
 
 export default function AdminUsersPage() {
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [errors, setErrors] = useState<RuleErrors>({});
-  const [message, setMessage] = useState<string | null>(null);
+  const { profile, loading: authLoading } = useAuth();
 
-  const [users, setUsers] = useState<Profile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const canViewUsers = !authLoading && profile?.role === "admin" && profile.status === "active";
+  const [users, setUsers] = useState<Profile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    if (!canViewUsers) return;
+
     let cancelled = false;
 
-    async function loadInvoices() {
-      try {
-        const result = await getAppUsers();
-
-        if (!cancelled) {
-          setUsers(result);
-          setError(null);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Unable to load users.");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    void loadInvoices();
+    listUsers()
+      .then((result) => {
+        if (cancelled) return;
+        setUsers(result);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : COPY.loadFailed);
+      });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [attempt, canViewUsers]);
 
-  const handleConfirm = () => {
-    setConfirmOpen(false);
-    setMessage(COPY.saved);
-  };
-
-  console.log("users", users);
-
+  function retry() {
+    setError(null);
+    setAttempt((n) => n + 1);
+  }
+  if (authLoading) return <p>loading permissions... </p>;
+  if (!canViewUsers) return <p>Your role does not have access</p>;
   return (
     <div className="space-y-6">
       <section className="rounded-lg border border-border bg-surface p-6">
         <h2 className="mb-6 inline-block rounded bg-surface-muted px-3 py-1 text-xl font-medium text-foreground">
           {COPY.sectionTitle}
         </h2>
+        <DataTable
+          label={COPY.sectionTitle}
+          columns={columns}
+          rows={users ?? []}
+          getRowKey={(profile) => profile.user_id}
+          loading={users === null && error === null}
+          loadingMessage={COPY.loading}
+          error={error}
+          onRetry={retry}
+          emptyMessage={COPY.empty}
+        />
       </section>
-
-      <div className="flex items-center justify-end gap-4">
-        {message && <span className="text-sm text-success">{message}</span>}
-      </div>
     </div>
   );
 }

@@ -13,25 +13,6 @@ router = APIRouter(
 _users: list[UserRead] = []
 
 
-# @router.get("", response_model=list[UserRead])
-# def get_app_users(
-# ) -> list[dict]:
-#     return get_users(
-#         client=get_admin_supabase(),
-
-#     )
-# @router.get("", response_model=list[UserRead])
-# def list_users(
-#     user: CurrentUser = Depends(require_active(UserRole.admin)),
-# ) -> list[UserRead]:
-
-#     users = get_users(
-#         client=get_admin_supabase(),
-#     )
-
-#     return users
-
-
 @router.get("", response_model=list[UserRead])
 def list_users(
     _user: CurrentUser = Depends(require_active(UserRole.admin)),
