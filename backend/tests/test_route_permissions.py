@@ -114,6 +114,8 @@ OPEN_ROUTES = {
     ("POST", "/vendor-accounts"),
     ("GET", "/vendor-accounts/{account_id}"),
     ("PATCH", "/vendor-accounts/{account_id}"),
+    # dc-38
+    ("GET", "/admin/users"),
 }
 
 
