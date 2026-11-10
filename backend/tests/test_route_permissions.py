@@ -35,6 +35,7 @@ ROLE_TABLE = [
     ("POST", "/vendors", {ADMIN}, 201),
     ("GET", "/vendors/{vendor_id}", {ANALYST, APPROVER, ADMIN}, 200),
     ("PATCH", "/vendors/{vendor_id}", {ADMIN}, 200),
+    ("GET", "/admin/users", {ADMIN}, 200),
 ]
 
 # Routes that need a signed-in user but no role.
@@ -114,8 +115,6 @@ OPEN_ROUTES = {
     ("POST", "/vendor-accounts"),
     ("GET", "/vendor-accounts/{account_id}"),
     ("PATCH", "/vendor-accounts/{account_id}"),
-    # dc-38
-    ("GET", "/admin/users"),
 }
 
 
