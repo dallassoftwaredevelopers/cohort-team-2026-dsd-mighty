@@ -26,7 +26,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useAuth } from "@/auth/AuthProvider";
 import { listUsers } from "@/lib/api/users";
-import type { Profile } from "@/types/user";
+import type { ApiProfile } from "@/types/user";
 import AdminUsersPage from "./page";
 
 jest.mock("@/auth/AuthProvider", () => ({
@@ -41,7 +41,7 @@ jest.mock("@/lib/api/users", () => ({
 const mockUseAuth = useAuth as jest.Mock;
 const mockListUsers = listUsers as jest.Mock;
 
-function profile(overrides: Partial<Profile> = {}): Profile {
+function profile(overrides: Partial<ApiProfile> = {}): ApiProfile {
   return {
     user_id: "user-123456789",
     full_name: "John Smith",

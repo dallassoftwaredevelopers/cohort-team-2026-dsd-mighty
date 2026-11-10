@@ -5,7 +5,7 @@ import { useAuth } from "@/auth/AuthProvider";
 import { DataTable, type DataTableColumn } from "@/components/DataTable/DataTable";
 import { StatusBadge } from "@/components/Status-Badge/status-badge";
 import { listUsers } from "@/lib/api/users";
-import type { Profile } from "@/types/user";
+import type { ApiProfile } from "@/types/user";
 
 const COPY = {
   sectionTitle: "All Users",
@@ -14,7 +14,7 @@ const COPY = {
   loadFailed: "Unable to load profiles.",
   notSet: "—",
 };
-const columns: DataTableColumn<Profile>[] = [
+const columns: DataTableColumn<ApiProfile>[] = [
   {
     header: "id",
     cell: (profile) => (
@@ -37,7 +37,7 @@ export default function AdminUsersPage() {
   const { profile, loading: authLoading } = useAuth();
 
   const canViewUsers = !authLoading && profile?.role === "admin" && profile.status === "active";
-  const [users, setUsers] = useState<Profile[] | null>(null);
+  const [users, setUsers] = useState<ApiProfile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
@@ -49,7 +49,12 @@ export default function AdminUsersPage() {
     listUsers()
       .then((result) => {
         if (cancelled) return;
-        setUsers(result);
+        setUsers(
+          result.map((user) => ({
+            ...user,
+            id: user.user_id,
+          })),
+        );
         setError(null);
       })
       .catch((err: unknown) => {
