@@ -13,6 +13,7 @@ import type { DashboardBill } from "@/types/bill";
 export default function DraftsPage() {
   const { profile, loading: accountLoading } = useAuth();
 
+  //ensure profile is not inactive
   const canLoad = !accountLoading && !!profile && profile.status !== "inactive";
 
   const [bills, setBills] = useState<DashboardBill[]>([]);
