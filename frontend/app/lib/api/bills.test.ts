@@ -106,7 +106,7 @@ afterEach(() => {
 });
 
 describe("createBill", () => {
-  it("POSTs the payload to /bills and returns the saved bill", async () => {
+  it("POSTs the payload to /bills with the bearer token and returns the saved bill", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 201,
@@ -117,6 +117,10 @@ describe("createBill", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("http://api.test/bills");
+    expect(fetchMock.mock.calls[0][1].headers).toEqual({
+      "Content-Type": "application/json",
+      Authorization: "Bearer test-token",
+    });
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(payload);
     expect(result).toEqual(savedBill);
   });
@@ -131,10 +135,13 @@ describe("createBill", () => {
     await expect(createBill(payload)).rejects.toThrow("Bill not found.");
   });
 
-  it("reports a missing API URL instead of a network error", async () => {
-    delete process.env.NEXT_PUBLIC_API_URL;
+  it("asks the user to sign in when there is no session", async () => {
+    signedOut();
 
-    await expect(createBill(payload)).rejects.toThrow("NEXT_PUBLIC_API_URL is missing");
+    await expect(createBill(payload)).rejects.toThrow(
+      "You must be signed in to submit an invoice.",
+    );
+
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
