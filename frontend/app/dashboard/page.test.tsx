@@ -3,9 +3,7 @@ import { getDashboardBills } from "@/lib/api/bills";
 import type { DashboardBill } from "@/types/bill";
 import DashboardPage from "./page";
 
-// One test id per table so the drafts table and the history table can be told
-// apart. The invoices are serialized so tests can check what each table got.
-
+// The invoices are serialized so tests can verify what the history table received.
 jest.mock("@/components/Invoice-table/invoice-table", () => ({
   InvoiceTable: ({ invoices, title }: { invoices: unknown[]; title: string }) => (
     <div
@@ -24,6 +22,8 @@ jest.mock("@/lib/api/bills", () => ({
 const mockGetDashboardBills = getDashboardBills as jest.MockedFunction<typeof getDashboardBills>;
 
 const mockUseAuth = jest.fn();
+
+const HISTORY_TABLE = "invoice-table-Invoice History";
 
 jest.mock("@/auth/AuthProvider", () => ({
   useAuth: () => mockUseAuth(),
@@ -63,9 +63,6 @@ function isoDaysFromNow(days: number): string {
     String(d.getDate()).padStart(2, "0"),
   ].join("-");
 }
-
-const DRAFTS_TABLE = "invoice-table-Saved Drafts";
-const HISTORY_TABLE = "invoice-table-Invoice History";
 
 async function renderLoaded(bills: DashboardBill[]) {
   mockGetDashboardBills.mockResolvedValue(bills);
@@ -108,15 +105,15 @@ describe("Dashboard", () => {
     expect(mockGetDashboardBills).not.toHaveBeenCalled();
   });
   describe("loading and errors", () => {
-    it("shows a loading state, then both invoice tables", async () => {
+    it("shows a loading state, then the invoice history table", async () => {
       mockGetDashboardBills.mockResolvedValue([bill(), bill({ bill_id: "bill-2" })]);
       render(<DashboardPage />);
 
       expect(screen.getByRole("status")).toHaveTextContent("Loading invoices...");
       expect(screen.queryByTestId(HISTORY_TABLE)).not.toBeInTheDocument();
 
-      expect(await screen.findByTestId(DRAFTS_TABLE)).toHaveAttribute("data-count", "2");
-      expect(screen.getByTestId(HISTORY_TABLE)).toHaveAttribute("data-count", "2");
+      expect(await screen.findByTestId(HISTORY_TABLE)).toHaveAttribute("data-count", "2");
+
       expect(screen.queryByText("Loading invoices...")).not.toBeInTheDocument();
     });
 
@@ -127,7 +124,6 @@ describe("Dashboard", () => {
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "You must be signed in to view invoices.",
       );
-      expect(screen.queryByTestId(DRAFTS_TABLE)).not.toBeInTheDocument();
       expect(screen.queryByTestId(HISTORY_TABLE)).not.toBeInTheDocument();
       expect(screen.queryByText("Outstanding")).not.toBeInTheDocument();
       expect(screen.queryByText("Loading invoices...")).not.toBeInTheDocument();
@@ -165,21 +161,23 @@ describe("Dashboard", () => {
     });
   });
 
-  describe("drafts and history", () => {
-    it("shows only drafts in Saved Drafts and every bill in Invoice History", async () => {
+  describe("invoice history and draft stats", () => {
+    it("shows every bill in Invoice History and counts saved drafts", async () => {
       await renderLoaded([
         bill({ bill_id: "d1", status: "draft" }),
         bill({ bill_id: "d2", status: "draft" }),
         bill({ bill_id: "p1", status: "pending_approval" }),
       ]);
 
-      expect(screen.getByTestId(DRAFTS_TABLE)).toHaveAttribute("data-count", "2");
       expect(screen.getByTestId(HISTORY_TABLE)).toHaveAttribute("data-count", "3");
-      expect(tableInvoices(DRAFTS_TABLE).map((i: { id: string }) => i.id)).toEqual(["d1", "d2"]);
 
-      // "Saved drafts" stat card
+      expect(tableInvoices(HISTORY_TABLE).map((invoice: { id: string }) => invoice.id)).toEqual([
+        "d1",
+        "d2",
+        "p1",
+      ]);
+
       expect(screen.getByText("2")).toBeInTheDocument();
-      expect(screen.getByText("Not yet submitted")).toBeInTheDocument();
     });
 
     it("maps a bill to an invoice and fills in missing fields", async () => {
@@ -206,14 +204,5 @@ describe("Dashboard", () => {
         status: "approved",
       });
     });
-  });
-
-  it("links to the new invoice form", async () => {
-    await renderLoaded([]);
-
-    expect(screen.getByRole("link", { name: /new invoice/i })).toHaveAttribute(
-      "href",
-      "/invoices/new",
-    );
   });
 });

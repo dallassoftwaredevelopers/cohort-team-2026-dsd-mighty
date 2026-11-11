@@ -8,21 +8,9 @@ import { useAuth } from "@/auth/AuthProvider";
 import { InvoiceTable } from "@/components/Invoice-table/invoice-table";
 import { StatCard } from "@/components/Stat-card/stat-card";
 import { getDashboardBills } from "@/lib/api/bills";
+import { toInvoice } from "@/lib/invoices";
 import type { DashboardBill } from "@/types/bill";
 import type { Invoice } from "@/types/invoice";
-
-function toInvoice(bill: DashboardBill): Invoice {
-  return {
-    id: bill.bill_id,
-    invoiceNumber: bill.invoice_number,
-    property: bill.property_address || "Not assigned",
-    company: bill.vendor_name_raw || "Not specified",
-    dueDate: bill.due_date,
-    vendor: bill.vendor_name_raw || "Not specified",
-    amount: bill.amount,
-    status: bill.status,
-  };
-}
 
 function toISODate(date: Date): string {
   return [
@@ -91,10 +79,8 @@ export default function DashboardPage() {
 
   const drafts = bills.filter((bill) => bill.status === "draft");
 
-  const submittedBills = bills.filter((bill) => bill.status !== "draft");
-
   const draftInvoices = drafts.map(toInvoice);
-  const invoices = submittedBills.map(toInvoice);
+  const invoices = bills.map(toInvoice);
 
   const outstanding = bills.filter((bill) =>
     ["pending_approval", "approved"].includes(bill.status),
@@ -155,17 +141,16 @@ export default function DashboardPage() {
               value={currency.format(dueThisWeekTotal)}
               hint={`${dueThisWeek.length} invoices`}
             />
-
-            <StatCard label="Saved drafts" value={String(drafts.length)} hint="Not yet submitted" />
+            <Link href="/invoices/drafts" className="block">
+              <StatCard
+                label="Saved drafts"
+                value={String(drafts.length)}
+                hint="View and continue editing"
+              />
+            </Link>
           </div>
 
           <div className="space-y-6">
-            <InvoiceTable
-              invoices={draftInvoices}
-              title="Saved Drafts"
-              emptyMessage="No saved drafts yet."
-            />
-
             <InvoiceTable
               invoices={invoices}
               title="Invoice History"
