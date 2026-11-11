@@ -84,3 +84,14 @@ export function getBillDraft(billId: string): Promise<BillDraftDetail> {
     { signedOut: "You must be signed in to view a draft.", failed: "Unable to load draft" },
   );
 }
+
+export function getBill(billId: string): Promise<Bill> {
+  return apiRequest<Bill>(
+    `/bills/${billId}`,
+    { method: "GET", cache: "no-store" },
+    {
+      signedOut: "You must be signed in to view this invoice.",
+      failed: "Unable to load invoice",
+    },
+  );
+}

@@ -79,7 +79,11 @@ export function InvoiceTable({
                   <td className="px-6 py-4 font-mono text-xs">
                     {invoice.status === "draft" ? (
                       <Link
-                        href={`/invoices/${invoice.id}/edit`}
+                        href={
+                          invoice.status === "draft"
+                            ? `/invoices/${invoice.id}/edit`
+                            : `/invoices/${invoice.id}`
+                        }
                         className="text-blue-600 hover:underline"
                       >
                         {invoice.invoiceNumber ?? invoice.id.slice(0, 8)}
