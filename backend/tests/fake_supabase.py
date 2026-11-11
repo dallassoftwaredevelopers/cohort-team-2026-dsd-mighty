@@ -160,3 +160,20 @@ class FakeSupabase:
         }
         self.table("vendors")._rows.append(row)
         return row
+
+    def add_user(
+        self,
+        user_id: str,
+        **fields: Any,
+    ) -> dict[str, Any]:
+        row = {
+            "user_id": user_id,
+            "full_name": "Test User",
+            "email": "test@example.com",
+            "role": "analyst",
+            "status": "active",
+            "created_at": datetime.now(UTC).isoformat(),
+            **fields,
+        }
+        self.table("app_users")._rows.append(row)
+        return row
