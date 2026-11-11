@@ -45,7 +45,7 @@ export default function DashboardPage() {
   const { profile, loading: accountLoading } = useAuth();
   // Wait for /me: an inactive user gets the waiting screen instead, and their
   // bill request would only be refused.
-  const canLoad = !accountLoading && profile?.status !== "inactive";
+  const canLoad = !accountLoading && !!profile && profile.status !== "inactive";
   const [bills, setBills] = useState<DashboardBill[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +94,7 @@ export default function DashboardPage() {
   const submittedBills = bills.filter((bill) => bill.status !== "draft");
 
   const draftInvoices = drafts.map(toInvoice);
-  const invoices = bills.map(toInvoice);
+  const invoices = submittedBills.map(toInvoice);
 
   const outstanding = bills.filter((bill) =>
     ["pending_approval", "approved"].includes(bill.status),
