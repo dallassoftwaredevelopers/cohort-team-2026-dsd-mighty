@@ -6,6 +6,7 @@ import type {
   BillDraftResponse,
   DashboardBill,
   DocumentUploadResponse,
+  DocumentUrlResponse,
 } from "@/types/bill";
 import { apiRequest } from "./http";
 
@@ -92,6 +93,17 @@ export function getBill(billId: string): Promise<Bill> {
     {
       signedOut: "You must be signed in to view this invoice.",
       failed: "Unable to load invoice",
+    },
+  );
+}
+
+export function getBillDocument(billId: string): Promise<DocumentUrlResponse> {
+  return apiRequest<DocumentUrlResponse>(
+    `/bills/${billId}/document`,
+    { method: "GET", cache: "no-store" },
+    {
+      signedOut: "You must be signed in to view this PDF.",
+      failed: "Unable to load invoice document",
     },
   );
 }

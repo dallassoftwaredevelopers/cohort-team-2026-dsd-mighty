@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { StatusBadge } from "@/components/Status-Badge/status-badge";
-import { getBill } from "@/lib/api/bills";
+import { getBill, getBillDocument } from "@/lib/api/bills";
 import type { Bill } from "@/types/bill";
 
 function formatDate(date: string | null) {
@@ -25,22 +25,47 @@ const currency = new Intl.NumberFormat("en-US", {
 
 export default function InvoiceDetailPage() {
   const params = useParams<{ id: string }>();
-  const billId = params.id;
+  const invoiceId = params.id;
 
   const [bill, setBill] = useState<Bill | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [documentUrl, setDocumentUrl] = useState<string | null>(null);
+  const [documentLoading, setDocumentLoading] = useState(false);
+  const [documentError, setDocumentError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadBill() {
       try {
-        const result = await getBill(billId);
+        const result = await getBill(invoiceId);
 
-        if (!cancelled) {
-          setBill(result);
-          setError(null);
+        if (cancelled) return;
+
+        setBill(result);
+        setError(null);
+
+        if (result.document_path) {
+          setDocumentLoading(true);
+
+          try {
+            const document = await getBillDocument(invoiceId);
+
+            if (!cancelled) {
+              setDocumentUrl(document.document_url);
+              setDocumentError(null);
+            }
+          } catch (err) {
+            if (!cancelled) {
+              setDocumentError(err instanceof Error ? err.message : "Unable to load invoice PDF.");
+            }
+          } finally {
+            if (!cancelled) {
+              setDocumentLoading(false);
+            }
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -58,7 +83,7 @@ export default function InvoiceDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [billId]);
+  }, [invoiceId]);
 
   if (loading) {
     return (
@@ -145,6 +170,34 @@ export default function InvoiceDetailPage() {
         <p className="mt-2 text-sm text-foreground-muted">
           {bill.description || "No description provided."}
         </p>
+      </section>
+
+      <section className="rounded-xl border border-border bg-surface p-6 shadow-sm">
+        <h2 className="text-lg font-semibold">Invoice Document</h2>
+
+        {documentLoading && (
+          <p role="status" className="mt-4 text-sm text-foreground-muted">
+            Loading PDF...
+          </p>
+        )}
+
+        {documentError && (
+          <p role="alert" className="mt-4 text-sm text-red-600">
+            {documentError}
+          </p>
+        )}
+
+        {!bill.document_path && (
+          <p className="mt-4 text-sm text-foreground-muted">No PDF attached to this invoice.</p>
+        )}
+
+        {documentUrl && (
+          <iframe
+            src={documentUrl}
+            title={`Invoice ${bill.invoice_number}`}
+            className="mt-4 h-[700px] w-full rounded-lg border border-border"
+          />
+        )}
       </section>
     </main>
   );
