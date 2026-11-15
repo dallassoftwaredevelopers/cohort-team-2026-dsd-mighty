@@ -2,13 +2,14 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { FileCheck, FileUp, LoaderCircle } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import { type DragEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import Button from "@/components/Button";
 import { FormField, inputClass } from "@/components/Form-field/form-field";
 import {
   extractBill,
+  getBill,
   getBillDraft,
   saveBillDraft,
   submitBill,
@@ -33,7 +34,7 @@ import {
   invoiceDraftFormSchema,
   invoiceFormSchema,
 } from "@/lib/invoice-form-schema";
-import type { BillCreatePayload, BillDraftDetail, BillDraftPayload } from "@/types/bill";
+import type { Bill, BillCreatePayload, BillDraftDetail, BillDraftPayload } from "@/types/bill";
 
 type ActionStatus = "idle" | "loading" | "success" | "error";
 
@@ -93,13 +94,20 @@ function pdfStorageNote(
     };
   }
   if (stored.kind === "file") {
-    return { tone: "stored", message: `Stored with this draft: ${stored.file.name}` };
+    return {
+      tone: "stored",
+      message: `Stored with this draft: ${stored.file.name}`,
+    };
   }
   if (stored.kind === "earlier") {
     return { tone: "stored", message: "A PDF is stored with this draft." };
   }
   return null;
 }
+
+type InvoiceFormProps = {
+  isResubmission?: boolean;
+};
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -125,6 +133,23 @@ function mapDraftToFormValues(draft: BillDraftDetail): InvoiceFormValues {
     propertyAddress: draft.property_address ?? "",
     accountStatus: draft.account_status ?? "",
     websiteName: draft.website_name ?? "",
+  };
+}
+
+function mapBillToFormValues(bill: Bill): InvoiceFormValues {
+  return {
+    accountNumber: bill.account_number_raw ?? "",
+    statementId: bill.invoice_number ?? "",
+    companyName: bill.vendor_name_raw ?? "",
+    issueDate: bill.invoice_date ?? "",
+    dueDate: bill.due_date ?? "",
+    currentDue: String(bill.amount ?? ""),
+    previousPayments: String(bill.prev_payments ?? ""),
+    description: bill.description ?? "",
+    notes: bill.processing_notes ?? "",
+    propertyAddress: bill.property_address ?? "",
+    accountStatus: bill.account_status ?? "",
+    websiteName: bill.website_name ?? "",
   };
 }
 
@@ -191,7 +216,7 @@ function draftIdFromPath(pathname: string): string | null {
 //   its bfcacheId. A pathname change the form did not make is therefore a new
 //   visit too. Layout effects only run while the page is shown, so the
 //   pathnames of other pages, seen while hidden, never count.
-export function InvoiceForm() {
+export function InvoiceForm({ isResubmission = false }: InvoiceFormProps) {
   const { bfcacheId } = useRouter();
   const pathname = usePathname();
   const [visit, setVisit] = useState(0);
@@ -220,7 +245,8 @@ export function InvoiceForm() {
   return (
     <InvoiceFormVisit
       key={`${bfcacheId}:${visit}`}
-      initialDraftId={draftIdFromPath(pathname)}
+      initialDraftId={isResubmission ? null : draftIdFromPath(pathname)}
+      isResubmission={isResubmission}
       onDraftCreated={showDraftUrl}
     />
   );
@@ -232,9 +258,14 @@ type InvoiceFormVisitProps = {
   initialDraftId: string | null;
   // The first Save Draft, or a Create with no draft yet, created this draft.
   onDraftCreated: (draftId: string) => void;
+  isResubmission: boolean;
 };
 
-function InvoiceFormVisit({ initialDraftId, onDraftCreated }: InvoiceFormVisitProps) {
+function InvoiceFormVisit({
+  initialDraftId,
+  isResubmission,
+  onDraftCreated,
+}: InvoiceFormVisitProps) {
   const router = useRouter();
   const [submitError, setSubmitError] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -243,6 +274,9 @@ function InvoiceFormVisit({ initialDraftId, onDraftCreated }: InvoiceFormVisitPr
   const [draftMessage, setDraftMessage] = useState("");
   const [draftStatus, setDraftStatus] = useState<ActionStatus>("idle");
   const [openedDraftId] = useState(initialDraftId);
+  const params = useParams<{ invoiceId?: string }>();
+  const routeInvoiceId = isResubmission ? (params.invoiceId ?? null) : null;
+  const [openedId] = useState(isResubmission ? routeInvoiceId : initialDraftId);
   const [draftId, setDraftId] = useState(openedDraftId);
   const [isLoadingDraft, setIsLoadingDraft] = useState(openedDraftId !== null);
   const [draftLoadError, setDraftLoadError] = useState<string | null>(null);
@@ -320,6 +354,24 @@ function InvoiceFormVisit({ initialDraftId, onDraftCreated }: InvoiceFormVisitPr
     setSubmitError("");
     setDraftMessage("");
 
+    if (isResubmission) {
+      try {
+        if (!routeInvoiceId) {
+          throw new Error("Missing invoice ID. Unable to resubmit.");
+        }
+
+        await resubmitBill(routeInvoiceId, createPayload(values));
+      } catch (error) {
+        setCreateStatus("error");
+        setSubmitError(errorMessage(error, "Unable to resubmit the invoice. Please try again."));
+        return;
+      }
+
+      setCreateStatus("success");
+      router.push("/dashboard");
+      return;
+    }
+
     let id = draftId;
     try {
       id ??= await saveDraftValues(draftPayload(values));
@@ -349,7 +401,10 @@ function InvoiceFormVisit({ initialDraftId, onDraftCreated }: InvoiceFormVisitPr
     }
 
     const payload = createPayload(values);
-    const attempt: UnansweredSubmit = { payload: JSON.stringify(payload), pdf: selectedFile };
+    const attempt: UnansweredSubmit = {
+      payload: JSON.stringify(payload),
+      pdf: selectedFile,
+    };
     try {
       await submitBill(id, payload);
     } catch (error) {
@@ -387,18 +442,30 @@ function InvoiceFormVisit({ initialDraftId, onDraftCreated }: InvoiceFormVisitPr
 
     let cancelled = false;
 
-    async function loadDraft() {
+    async function loadInvoice() {
       setIsLoadingDraft(true);
       setDraftLoadError(null);
 
       try {
-        const draft = await getBillDraft(id);
+        if (isResubmission) {
+          const bill = await getBill(id);
 
-        if (cancelled) return;
+          if (bill.status !== "rejected") {
+            setDraftLoadError("Only rejected invoices can be resubmitted.");
+            return;
+          }
 
-        draftLoaded.current = true;
-        reset(mapDraftToFormValues(draft));
-        if (draft.document_path) setStoredPdf({ kind: "earlier" });
+          draftLoaded.current = true;
+          reset(mapBillToFormValues(bill));
+        } else {
+          const draft = await getBillDraft(id);
+
+          if (cancelled) return;
+
+          draftLoaded.current = true;
+          reset(mapDraftToFormValues(draft));
+          if (draft.document_path) setStoredPdf({ kind: "earlier" });
+        }
       } catch (err) {
         if (cancelled) return;
 
@@ -412,12 +479,12 @@ function InvoiceFormVisit({ initialDraftId, onDraftCreated }: InvoiceFormVisitPr
       }
     }
 
-    void loadDraft();
+    void loadInvoice();
 
     return () => {
       cancelled = true;
     };
-  }, [openedDraftId, reset]);
+  }, [openedDraftId, isResubmission, reset]);
 
   // Leaving the page (or unmounting) stops a read in flight. Its result would
   // be dropped, so "Reading invoice..." must not be left showing for when the
@@ -464,7 +531,10 @@ function InvoiceFormVisit({ initialDraftId, onDraftCreated }: InvoiceFormVisitPr
     for (const [name, value] of entries) {
       // Re-validate only a field already showing an error, so a filled
       // value clears "required" without new errors appearing before Create.
-      setValue(name, value, { shouldDirty: true, shouldValidate: getFieldState(name).invalid });
+      setValue(name, value, {
+        shouldDirty: true,
+        shouldValidate: getFieldState(name).invalid,
+      });
       if (value === "") readerFilled.current.delete(name);
       else readerFilled.current.set(name, value);
     }
@@ -594,7 +664,9 @@ function InvoiceFormVisit({ initialDraftId, onDraftCreated }: InvoiceFormVisitPr
 
   if (isLoadingDraft) {
     return (
-      <p className="mx-auto max-w-3xl py-16 text-center text-foreground-muted">Loading draft...</p>
+      <p className="mx-auto max-w-3xl py-16 text-center text-foreground-muted">
+        {isResubmission ? "Loading rejected invoice..." : "Loading draft..."}
+      </p>
     );
   }
 
@@ -648,24 +720,26 @@ function InvoiceFormVisit({ initialDraftId, onDraftCreated }: InvoiceFormVisitPr
       )}
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-3xl font-semibold tracking-tight text-foreground">
-          {draftId ? "Edit Draft" : "New Invoice"}
+          {isResubmission ? "Resubmit Rejected Invoice" : draftId ? "Edit Draft" : "New Invoice"}
         </h1>
 
         <div className="flex items-center gap-3">
-          <Button
-            label={
-              draftStatus === "loading"
-                ? "Saving..."
-                : draftStatus === "success"
-                  ? "Draft Saved ✓"
-                  : draftStatus === "error"
-                    ? "Retry Save"
-                    : "Save Draft"
-            }
-            type="button"
-            onClick={handleSaveDraft}
-            disabled={!canSaveDraft}
-          />
+          {!isResubmission && (
+            <Button
+              label={
+                draftStatus === "loading"
+                  ? "Saving..."
+                  : draftStatus === "success"
+                    ? "Draft Saved ✓"
+                    : draftStatus === "error"
+                      ? "Retry Save"
+                      : "Save Draft"
+              }
+              type="button"
+              onClick={handleSaveDraft}
+              disabled={!canSaveDraft}
+            />
+          )}
           <Button
             label="Cancel"
             variant="secondary"
@@ -934,12 +1008,18 @@ function InvoiceFormVisit({ initialDraftId, onDraftCreated }: InvoiceFormVisitPr
       <Button
         label={
           createStatus === "loading"
-            ? "Creating..."
+            ? isResubmission
+              ? "Resubmitting..."
+              : "Creating..."
             : createStatus === "success"
-              ? "Created ✓"
+              ? isResubmission
+                ? "Resubmitted ✓"
+                : "Created ✓"
               : createStatus === "error"
-                ? "Retry Create"
-                : "Create"
+                ? "Retry"
+                : isResubmission
+                  ? "Resubmit Invoice"
+                  : "Create"
         }
         type="submit"
         disabled={saving || created}
