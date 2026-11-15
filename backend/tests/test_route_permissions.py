@@ -36,6 +36,7 @@ ROLE_TABLE = [
     ("POST", "/bills/drafts", {ANALYST, ADMIN}, 201),
     ("GET", "/bills/{bill_id}/draft", {ANALYST, ADMIN}, 200),
     ("PATCH", "/bills/{bill_id}/draft", {ANALYST, ADMIN}, 200),
+    ("GET", "/bills/{bill_id}/document", {ANALYST, APPROVER, ADMIN}, 200),
     ("POST", "/bills/{bill_id}/document", {ANALYST, ADMIN}, 201),
     ("POST", "/bills/{bill_id}/submit", {ANALYST, ADMIN}, 200),
     ("POST", "/bills/extract", {ANALYST, ADMIN}, 200),
@@ -44,6 +45,19 @@ ROLE_TABLE = [
     ("GET", "/vendors/{vendor_id}", {ANALYST, APPROVER, ADMIN}, 200),
     ("PATCH", "/vendors/{vendor_id}", {ADMIN}, 200),
     ("GET", "/admin/users", {ADMIN}, 200),
+    (
+        "GET",
+        "/approvals",
+        {APPROVER, ADMIN},
+        200,
+    ),
+    (
+        "POST",
+        "/approvals/{approval_id}/decision",
+        {APPROVER, ADMIN},
+        200,
+    ),
+    ("POST", "/bills/{bill_id}/resubmit", {ANALYST, ADMIN}, 200),
     ("GET", "/admin/users/{user_id}", {ADMIN}, 200),
     ("PATCH", "/admin/users/{user_id}", {ADMIN}, 200),
 ]
@@ -69,6 +83,20 @@ REQUEST_BODY = {
     ("POST", "/vendors"): {"json": {"name": "Acme Water"}},
     ("PATCH", "/vendors/{vendor_id}"): {"json": {"contact_phone": "555-0100"}},
     ("PATCH", "/admin/users/{user_id}"): {"json": {"role": "approver"}},
+    ("POST", "/approvals/{approval_id}/decision"): {
+        "json": {
+            "decision": "approve",
+        }
+    },
+    ("POST", "/bills/{bill_id}/resubmit"): {
+        "json": {
+            "account_number_raw": "ACC-1",
+            "invoice_number": "INV-1",
+            "invoice_date": "2026-11-01",
+            "due_date": "2026-12-01",
+            "amount": "10.00",
+        }
+    },
 }
 
 CASES = [
@@ -89,11 +117,16 @@ CASES = [
 @pytest.fixture
 def db():
     fake = FakeSupabase()
+
+    # The document route needs an existing PDF to generate a signed URL.
+    fake.storage.objects["bills/test/invoice.pdf"] = PDF[1]
+
     with (
         patch("backend.api.bills.get_admin_supabase", return_value=fake),
         patch("backend.api.bill_documents.get_admin_supabase", return_value=fake),
         patch("backend.api.vendors.get_admin_supabase", return_value=fake),
         patch("backend.api.users.get_admin_supabase", return_value=fake),
+        patch("backend.api.approvals.get_admin_supabase", return_value=fake),
     ):
         yield fake
 
@@ -120,7 +153,36 @@ def test_route_allows_only_its_active_roles(
         status=status,
     )
 
-    bill = db.add_bill(str(user.id))
+    document_path = (
+        "bills/test/invoice.pdf"
+        if method == "GET" and path == "/bills/{bill_id}/document"
+        else None
+    )
+
+    if path == "/bills/{bill_id}/resubmit":
+        bill_status = "rejected"
+    elif path in {
+        "/approvals",
+        "/approvals/{approval_id}/decision",
+    }:
+        bill_status = "pending_approval"
+    else:
+        bill_status = "draft"
+
+    bill = db.add_bill(
+        str(user.id),
+        status=bill_status,
+        document_path=document_path,
+    )
+
+    approval = None
+
+    if path != "/bills/{bill_id}/submit":
+        approval = db.add_approval(bill["bill_id"])
+
+    if path == "/bills/{bill_id}/resubmit":
+        approval["approval_status"] = "rejected"
+
     vendor = db.add_vendor("Acme Water")
 
     target_user = db.add_user(
@@ -143,6 +205,11 @@ def test_route_allows_only_its_active_roles(
             bill_id=bill["bill_id"],
             vendor_id=vendor["vendor_id"],
             user_id=target_user["user_id"],
+            approval_id=(
+                approval["approval_id"]
+                if approval is not None
+                else "00000000-0000-0000-0000-000000000002"
+            ),
         ),
         **REQUEST_BODY.get((method, path), {}),
     )
@@ -164,8 +231,6 @@ OPEN_ROUTES = {
     # applies (test_health.py checks it never uses the admin client).
     ("GET", "/health"),
     # In-memory stubs; DC-43 (approve and reject actions) adds the role check.
-    ("GET", "/approvals"),
-    ("POST", "/approvals/{approval_id}/decision"),
     # In-memory stubs, no Supabase; must get a role-table row before they touch
     # Supabase.
     ("POST", "/vendor-accounts"),

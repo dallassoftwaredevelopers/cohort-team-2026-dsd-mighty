@@ -6,6 +6,7 @@ from backend.auth import CurrentUser, require_active
 from backend.schemas.bill import (
     BillCreate,
     BillDashboardRow,
+    BillDocumentUrl,
     BillDraftCreate,
     BillDraftDetail,
     BillDraftRead,
@@ -24,10 +25,13 @@ from backend.services.bill_repository import (
     get_readable_bill,
     list_dashboard_bills,
     list_readable_bills,
+    resubmit_bill_with_approval,
     save_bill,
-    submit_draft,
+    submit_bill_with_approval,
+    submit_draft_with_approval,
     update_draft,
 )
+from backend.services.bill_storage import create_pdf_signed_url
 from backend.supabase_client import get_admin_supabase
 
 router = APIRouter(
@@ -36,16 +40,39 @@ router = APIRouter(
 )
 
 
-@router.post("", response_model=BillRead, status_code=status.HTTP_201_CREATED)
+# Submit a brand-new invoice and create its pending approval.
+@router.post(
+    "",
+    response_model=BillRead,
+    status_code=status.HTTP_201_CREATED,
+)
 def create_bill(
     bill: BillCreate,
     user: CurrentUser = Depends(require_active(*BILL_WRITERS)),
 ) -> BillRead:
-    return save_bill(
+    return submit_bill_with_approval(
         client=get_admin_supabase(),
         fields=bill,
         user_id=user.id,
-        status=BillStatus.pending_approval,
+    )
+
+
+# Resubmit a previously rejected invoice.
+# The existing bill and rejected approval history are preserved.
+@router.post(
+    "/{bill_id}/resubmit",
+    response_model=BillRead,
+)
+def resubmit_bill(
+    bill_id: UUID,
+    bill: BillCreate,
+    user: CurrentUser = Depends(require_active(*BILL_WRITERS)),
+) -> BillRead:
+    return resubmit_bill_with_approval(
+        client=get_admin_supabase(),
+        bill_id=bill_id,
+        fields=bill,
+        user_id=user.id,
     )
 
 
@@ -73,13 +100,18 @@ def get_dashboard_bills(
     )
 
 
-@router.get("/{bill_id}", response_model=BillRead)
-def get_bill(
+@router.get(
+    "/{bill_id}/document",
+    response_model=BillDocumentUrl,
+)
+def get_bill_document(
     bill_id: UUID,
     user: CurrentUser = Depends(require_active(*BILL_READERS)),
-) -> BillRead:
+) -> BillDocumentUrl:
+    client = get_admin_supabase()
+
     bill = get_readable_bill(
-        client=get_admin_supabase(),
+        client=client,
         bill_id=bill_id,
         user_id=user.id,
     )
@@ -90,9 +122,30 @@ def get_bill(
             detail="Bill not found.",
         )
 
-    return bill
+    bill_data = BillRead.model_validate(bill)
+    document_path = bill_data.document_path
+
+    if not document_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invoice document not found.",
+        )
+
+    try:
+        signed_url = create_pdf_signed_url(
+            client=client,
+            storage_path=document_path,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to retrieve invoice document.",
+        ) from exc
+
+    return BillDocumentUrl(document_url=signed_url)
 
 
+# Save a new draft without creating an approval record.
 @router.post(
     "/drafts",
     response_model=BillDraftRead,
@@ -141,41 +194,53 @@ def update_existing_draft(
     return BillDraftRead.model_validate(updated)
 
 
-@router.post("/{bill_id}/submit", response_model=BillRead)
+# Submit an existing draft, preserving its bill ID and attached PDF.
+# The repository function must also create the pending approval record
+# in the same database transaction.
+@router.post(
+    "/{bill_id}/submit",
+    response_model=BillRead,
+)
 def submit_existing_draft(
     bill_id: UUID,
     bill: BillCreate,
     user: CurrentUser = Depends(require_active(*BILL_WRITERS)),
 ) -> BillRead:
-    """Create from a saved draft: the same bill, with its stored PDF, goes for
-    approval with the final values. `POST /bills` still creates a bill with
-    no draft behind it."""
     client = get_admin_supabase()
-    submitted = submit_draft(
+
+    submitted = submit_draft_with_approval(
         client=client,
         bill_id=bill_id,
-        user_id=str(user.id),
         fields=bill,
+        user_id=user.id,
     )
 
     if submitted is not None:
         return submitted
 
-    # Only the caller's own bills are told apart, so the 409 leaks nothing.
-    if get_own_bill_status(client, bill_id, str(user.id)) is not None:
+    existing_status = get_own_bill_status(
+        client=client,
+        bill_id=bill_id,
+        user_id=str(user.id),
+    )
+
+    if existing_status is None:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="This bill has already been submitted.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Editable draft not found.",
         )
 
+    # The user's bill exists, but it is no longer an editable draft.
     raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Editable draft not found.",
+        status_code=status.HTTP_409_CONFLICT,
+        detail="This bill has already been submitted.",
     )
 
 
-# retrieves an existing one
-@router.get("/{bill_id}/draft", response_model=BillDraftDetail)
+@router.get(
+    "/{bill_id}/draft",
+    response_model=BillDraftDetail,
+)
 def get_draft(
     bill_id: UUID,
     user: CurrentUser = Depends(require_active(*BILL_WRITERS)),
@@ -193,3 +258,23 @@ def get_draft(
         )
 
     return BillDraftDetail.model_validate(draft)
+
+
+@router.get("/{bill_id}", response_model=BillRead)
+def get_bill(
+    bill_id: UUID,
+    user: CurrentUser = Depends(require_active(*BILL_READERS)),
+) -> BillRead:
+    bill = get_readable_bill(
+        client=get_admin_supabase(),
+        bill_id=bill_id,
+        user_id=user.id,
+    )
+
+    if bill is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Bill not found.",
+        )
+
+    return bill
