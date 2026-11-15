@@ -1020,7 +1020,9 @@ function InvoiceFormVisit({
                 ? "Resubmitted ✓"
                 : "Created ✓"
               : createStatus === "error"
-                ? "Retry"
+                ? isResubmission
+                  ? "Retry Resubmit"
+                  : "Retry Create"
                 : isResubmission
                   ? "Resubmit Invoice"
                   : "Create"

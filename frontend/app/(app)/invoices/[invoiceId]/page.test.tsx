@@ -108,7 +108,8 @@ describe("InvoiceDetailPage", () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    mockUseParams.mockReturnValue({ id: "bill-123" });
+    // Covers both [invoiceId] and [id] route param names.
+    mockUseParams.mockReturnValue({ invoiceId: "bill-123", id: "bill-123" });
 
     mockGetBill.mockResolvedValue(bill());
     mockGetBillDocument.mockResolvedValue({

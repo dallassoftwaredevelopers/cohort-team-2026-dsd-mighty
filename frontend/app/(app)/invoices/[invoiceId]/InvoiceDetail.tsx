@@ -254,24 +254,17 @@ export default function InvoiceDetail() {
             <h1 className="text-2xl font-semibold text-foreground">{bill.invoice_number}</h1>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <p className="text-sm text-foreground-muted">Invoice</p>
-              <h1 className="text-2xl font-semibold text-foreground">{bill.invoice_number}</h1>
-            </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <StatusBadge status={bill.status} />
 
-            <div className="flex flex-wrap items-center gap-3">
-              <StatusBadge status={bill.status} />
-
-              {canResubmit && (
-                <Link
-                  href={`/invoices/${invoiceId}/resubmit`}
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
-                >
-                  Edit & Resubmit
-                </Link>
-              )}
-            </div>
+            {canResubmit && (
+              <Link
+                href={`/invoices/${invoiceId}/resubmit`}
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+              >
+                Edit & Resubmit
+              </Link>
+            )}
           </div>
         </div>
 

@@ -53,13 +53,23 @@ function useMockRouter(): MockRouter {
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push, bfcacheId: useMockRouter().bfcacheId }),
   usePathname: () => useMockRouter().pathname,
+  useParams: () => {
+    const { pathname } = useMockRouter();
+    const match = pathname.match(/^\/invoices\/([^/]+)\/(?:edit|resubmit)$/);
+    return match ? { invoiceId: match[1] } : {};
+  },
 }));
 
 // Next patches history.replaceState so usePathname follows it.
 const nativeReplaceState = window.history.replaceState.bind(window.history);
 jest.spyOn(window.history, "replaceState").mockImplementation((data, unused, url) => {
   nativeReplaceState(data, unused, url);
-  if (url) act(() => mockSetRouter({ pathname: new URL(url, window.location.href).pathname }));
+  if (url)
+    act(() =>
+      mockSetRouter({
+        pathname: new URL(url, window.location.href).pathname,
+      }),
+    );
 });
 
 // A link or router.push to another page: this one is hidden, not unmounted.
@@ -70,7 +80,13 @@ function leaveTo(pathname: string) {
 // A link or router.push into this page from another one: a fresh segment.
 function arriveByLink(pathname: string) {
   mockFreshSegments += 1;
-  act(() => mockSetRouter({ pathname, shown: true, bfcacheId: `_b_${mockFreshSegments}_` }));
+  act(() =>
+    mockSetRouter({
+      pathname,
+      shown: true,
+      bfcacheId: `_b_${mockFreshSegments}_`,
+    }),
+  );
 }
 
 // Back or forward to this page: Next restores its bfcacheId.
@@ -330,7 +346,11 @@ describe("InvoiceForm", () => {
       status: "draft" as const,
       document_path: null,
     };
-    const stored = { bill_id: "bill-1", document_path: "bills/bill-1/x.pdf", status: "draft" };
+    const stored = {
+      bill_id: "bill-1",
+      document_path: "bills/bill-1/x.pdf",
+      status: "draft",
+    };
 
     beforeEach(() => {
       mockSaveBillDraft.mockReset().mockResolvedValue(savedDraft);
@@ -339,7 +359,11 @@ describe("InvoiceForm", () => {
     });
 
     async function saveDraft(user: ReturnType<typeof userEvent.setup>) {
-      await user.click(screen.getByRole("button", { name: /Save Draft|Draft Saved|Retry Save/ }));
+      await user.click(
+        screen.getByRole("button", {
+          name: /Save Draft|Draft Saved|Retry Save/,
+        }),
+      );
     }
 
     it("has no Upload PDF button", () => {
@@ -352,7 +376,9 @@ describe("InvoiceForm", () => {
     it("says a picked PDF is stored on the next save", () => {
       render(<InvoiceForm />);
 
-      fireEvent.drop(dropZone(), { dataTransfer: { files: [pdf("harborlight-bill.pdf")] } });
+      fireEvent.drop(dropZone(), {
+        dataTransfer: { files: [pdf("harborlight-bill.pdf")] },
+      });
 
       expect(
         screen.getByText(
@@ -397,7 +423,9 @@ describe("InvoiceForm", () => {
       const user = userEvent.setup();
       render(<InvoiceForm />);
       await user.type(screen.getByLabelText("Statement / Bill ID"), "INV-2001");
-      fireEvent.drop(dropZone(), { dataTransfer: { files: [pdf("first.pdf")] } });
+      fireEvent.drop(dropZone(), {
+        dataTransfer: { files: [pdf("first.pdf")] },
+      });
       await saveDraft(user);
       await screen.findByText("Stored with this draft: first.pdf");
 
@@ -470,7 +498,11 @@ describe("InvoiceForm", () => {
       document_path: null,
     };
     const submitted = { id: "bill-1", status: "pending_approval" } as Bill;
-    const stored = { bill_id: "bill-1", document_path: "bills/bill-1/x.pdf", status: "draft" };
+    const stored = {
+      bill_id: "bill-1",
+      document_path: "bills/bill-1/x.pdf",
+      status: "draft",
+    };
 
     beforeEach(() => {
       mockSaveBillDraft.mockReset().mockResolvedValue(savedDraft);
@@ -542,7 +574,9 @@ describe("InvoiceForm", () => {
       fireEvent.drop(dropZone(), { dataTransfer: { files: [file] } });
       await user.click(screen.getByRole("button", { name: "Save Draft" }));
       await screen.findByRole("button", { name: "Draft Saved ✓" });
-      fireEvent.change(screen.getByLabelText("Current Due"), { target: { value: "275.00" } });
+      fireEvent.change(screen.getByLabelText("Current Due"), {
+        target: { value: "275.00" },
+      });
 
       await create(user);
 
@@ -639,7 +673,9 @@ describe("InvoiceForm", () => {
 
       await create(user);
       await screen.findByRole("alert");
-      fireEvent.change(screen.getByLabelText("Current Due"), { target: { value: "275.00" } });
+      fireEvent.change(screen.getByLabelText("Current Due"), {
+        target: { value: "275.00" },
+      });
       await user.click(screen.getByRole("button", { name: /Create/ }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent(alreadySent);
@@ -669,13 +705,17 @@ describe("InvoiceForm", () => {
       mockSubmitBill.mockRejectedValueOnce(new Error("Unable to reach the server."));
       render(<InvoiceForm />);
       fillInValidBill();
-      fireEvent.drop(dropZone(), { dataTransfer: { files: [pdf("first.pdf")] } });
+      fireEvent.drop(dropZone(), {
+        dataTransfer: { files: [pdf("first.pdf")] },
+      });
 
       await create(user);
       await screen.findByRole("alert");
       // The bill is no longer a draft, so storing another PDF on it is refused.
       mockUploadInvoicePdf.mockRejectedValueOnce(new ApiError("Editable draft not found.", 404));
-      fireEvent.drop(dropZone(), { dataTransfer: { files: [pdf("second.pdf")] } });
+      fireEvent.drop(dropZone(), {
+        dataTransfer: { files: [pdf("second.pdf")] },
+      });
       await user.click(screen.getByRole("button", { name: /Create/ }));
 
       const alert = await screen.findByRole("alert");
@@ -938,7 +978,9 @@ describe("InvoiceForm", () => {
         "status",
       );
 
-      fireEvent.drop(dropZone(), { dataTransfer: { files: [pdf("newer.pdf")] } });
+      fireEvent.drop(dropZone(), {
+        dataTransfer: { files: [pdf("newer.pdf")] },
+      });
 
       expect(screen.queryByText("A PDF is stored with this draft.")).not.toBeInTheDocument();
       expect(
@@ -1136,7 +1178,10 @@ describe("InvoiceForm", () => {
       fireEvent.drop(dropZone(), { dataTransfer: { files: [pdf("a.pdf")] } });
 
       leaveTo("/dashboard");
-      mockGetBillDraft.mockResolvedValueOnce({ ...draft, account_number_raw: "ACC-200" });
+      mockGetBillDraft.mockResolvedValueOnce({
+        ...draft,
+        account_number_raw: "ACC-200",
+      });
       arriveByLink("/invoices/bill-1/edit");
 
       expect(await screen.findByDisplayValue("ACC-200")).toBeInTheDocument();
@@ -1312,10 +1357,14 @@ describe("InvoiceForm", () => {
       const user = userEvent.setup();
       mockExtractBill
         .mockResolvedValueOnce(
-          extractionResult({ extraction: extraction({ account_status: status("paid", "low") }) }),
+          extractionResult({
+            extraction: extraction({ account_status: status("paid", "low") }),
+          }),
         )
         .mockResolvedValueOnce(
-          extractionResult({ extraction: extraction({ account_status: status("outstanding") }) }),
+          extractionResult({
+            extraction: extraction({ account_status: status("outstanding") }),
+          }),
         );
       render(<InvoiceForm />);
 
@@ -1365,9 +1414,17 @@ describe("InvoiceForm", () => {
           status: "needs_attention",
           extraction: extraction({ amount_due: read("1,18") }),
           issues: [
-            { code: "BAD_AMOUNT", field: "amount_due", message: "amount_due is not valid" },
+            {
+              code: "BAD_AMOUNT",
+              field: "amount_due",
+              message: "amount_due is not valid",
+            },
             { code: "LOW_CONFIDENCE", field: "vendor_name", message: "low" },
-            { code: "BALANCE_MISMATCH", field: "previous_balance", message: "x" },
+            {
+              code: "BALANCE_MISMATCH",
+              field: "previous_balance",
+              message: "x",
+            },
           ],
         }),
       );
@@ -1467,7 +1524,9 @@ describe("InvoiceForm", () => {
 
       await act(async () =>
         first.resolve(
-          extractionResult({ extraction: extraction({ vendor_name: read("Old Vendor") }) }),
+          extractionResult({
+            extraction: extraction({ vendor_name: read("Old Vendor") }),
+          }),
         ),
       );
       expect(screen.getByLabelText("Customer / Business Name")).toHaveValue("");
@@ -1475,7 +1534,9 @@ describe("InvoiceForm", () => {
 
       await act(async () =>
         second.resolve(
-          extractionResult({ extraction: extraction({ vendor_name: read("New Vendor") }) }),
+          extractionResult({
+            extraction: extraction({ vendor_name: read("New Vendor") }),
+          }),
         ),
       );
       expect(screen.getByLabelText("Customer / Business Name")).toHaveValue("New Vendor");
@@ -1508,7 +1569,9 @@ describe("InvoiceForm", () => {
 
       pick();
       fireEvent.drop(dropZone(), {
-        dataTransfer: { files: [new File(["x"], "photo.png", { type: "image/png" })] },
+        dataTransfer: {
+          files: [new File(["x"], "photo.png", { type: "image/png" })],
+        },
       });
 
       expect((mockExtractBill.mock.calls[0][1] as AbortSignal).aborted).toBe(true);
@@ -1541,9 +1604,11 @@ describe("InvoiceForm", () => {
       const user = userEvent.setup();
       const read = pendingRead();
       mockExtractBill.mockReturnValue(read.promise);
-      mockSaveBillDraft
-        .mockReset()
-        .mockResolvedValue({ bill_id: "bill-1", status: "draft", document_path: null });
+      mockSaveBillDraft.mockReset().mockResolvedValue({
+        bill_id: "bill-1",
+        status: "draft",
+        document_path: null,
+      });
       render(<InvoiceForm />);
 
       await user.type(screen.getByLabelText("Bill Description / Explanation"), "Power");
@@ -1650,11 +1715,11 @@ describe("InvoiceForm", () => {
         website_name: null,
         document_path: null,
       });
-      mockExtractBill
-        .mockResolvedValueOnce(extractionResult())
-        .mockResolvedValueOnce(
-          extractionResult({ extraction: extraction({ account_number: read("B-ACC") }) }),
-        );
+      mockExtractBill.mockResolvedValueOnce(extractionResult()).mockResolvedValueOnce(
+        extractionResult({
+          extraction: extraction({ account_number: read("B-ACC") }),
+        }),
+      );
       render(<InvoiceForm />);
       await screen.findByDisplayValue("DRAFT-ACC");
 
