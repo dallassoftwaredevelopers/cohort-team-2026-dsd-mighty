@@ -90,9 +90,10 @@ describe("Invoice table", () => {
   it("does not link approved invoices to the edit page", () => {
     render(<InvoiceTable invoices={[approvedInvoice]} />);
 
-    expect(screen.queryByRole("link", { name: "INV-APPROVED-1" })).not.toBeInTheDocument();
-
-    expect(screen.getByText("INV-APPROVED-1")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "INV-APPROVED-1" })).toHaveAttribute(
+      "href",
+      "/invoices/approved-1001",
+    );
   });
 
   it("does not link paid invoices to the edit page", () => {

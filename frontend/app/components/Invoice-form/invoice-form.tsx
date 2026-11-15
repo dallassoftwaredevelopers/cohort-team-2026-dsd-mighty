@@ -11,6 +11,7 @@ import {
   extractBill,
   getBill,
   getBillDraft,
+  resubmitBill,
   saveBillDraft,
   submitBill,
   updateBillDraft,
@@ -107,6 +108,7 @@ function pdfStorageNote(
 
 type InvoiceFormProps = {
   isResubmission?: boolean;
+  invoiceId?: string;
 };
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -216,7 +218,7 @@ function draftIdFromPath(pathname: string): string | null {
 //   its bfcacheId. A pathname change the form did not make is therefore a new
 //   visit too. Layout effects only run while the page is shown, so the
 //   pathnames of other pages, seen while hidden, never count.
-export function InvoiceForm({ isResubmission = false }: InvoiceFormProps) {
+export function InvoiceForm({ isResubmission = false, invoiceId }: InvoiceFormProps) {
   const { bfcacheId } = useRouter();
   const pathname = usePathname();
   const [visit, setVisit] = useState(0);
@@ -245,7 +247,7 @@ export function InvoiceForm({ isResubmission = false }: InvoiceFormProps) {
   return (
     <InvoiceFormVisit
       key={`${bfcacheId}:${visit}`}
-      initialDraftId={isResubmission ? null : draftIdFromPath(pathname)}
+      initialDraftId={isResubmission ? (invoiceId ?? null) : draftIdFromPath(pathname)}
       isResubmission={isResubmission}
       onDraftCreated={showDraftUrl}
     />
@@ -278,7 +280,7 @@ function InvoiceFormVisit({
   const routeInvoiceId = isResubmission ? (params.invoiceId ?? null) : null;
   const [openedId] = useState(isResubmission ? routeInvoiceId : initialDraftId);
   const [draftId, setDraftId] = useState(openedDraftId);
-  const [isLoadingDraft, setIsLoadingDraft] = useState(openedDraftId !== null);
+  const [isLoadingDraft, setIsLoadingDraft] = useState(openedId !== null);
   const [draftLoadError, setDraftLoadError] = useState<string | null>(null);
   const draftLoaded = useRef(false);
 
@@ -437,8 +439,8 @@ function InvoiceFormVisit({
   // Effects run again each time the page is shown, so after back or forward
   // the draft is not reloaded over the person's unsaved edits.
   useEffect(() => {
-    if (openedDraftId === null || draftLoaded.current) return;
-    const id = openedDraftId;
+    if (openedId === null || draftLoaded.current) return;
+    const id = openedId;
 
     let cancelled = false;
 
@@ -449,6 +451,8 @@ function InvoiceFormVisit({
       try {
         if (isResubmission) {
           const bill = await getBill(id);
+
+          if (cancelled) return;
 
           if (bill.status !== "rejected") {
             setDraftLoadError("Only rejected invoices can be resubmitted.");
@@ -484,7 +488,7 @@ function InvoiceFormVisit({
     return () => {
       cancelled = true;
     };
-  }, [openedDraftId, isResubmission, reset]);
+  }, [openedId, isResubmission, reset]);
 
   // Leaving the page (or unmounting) stops a read in flight. Its result would
   // be dropped, so "Reading invoice..." must not be left showing for when the
