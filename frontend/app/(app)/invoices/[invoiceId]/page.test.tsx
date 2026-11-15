@@ -80,7 +80,7 @@ function signInAs(
   loading = false,
 ) {
   mockUseAuth.mockReturnValue({
-    profile: role ? { role, status } : null,
+    profile: role ? { id: "user-456", role, status } : null,
     loading,
   });
 }
@@ -108,8 +108,7 @@ describe("InvoiceDetailPage", () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    // Covers both [invoiceId] and [id] route param names.
-    mockUseParams.mockReturnValue({ invoiceId: "bill-123", id: "bill-123" });
+    mockUseParams.mockReturnValue({ invoiceId: "bill-123" });
 
     mockGetBill.mockResolvedValue(bill());
     mockGetBillDocument.mockResolvedValue({
@@ -249,13 +248,12 @@ describe("InvoiceDetailPage", () => {
     it("shows a loading state while approval details load", async () => {
       mockUseAuth.mockReturnValue({
         profile: {
+          id: "user-456",
           role: "approver",
           status: "active",
         },
         loading: false,
       });
-
-      mockUseParams.mockReturnValue({ id: "bill-123" });
 
       mockGetBill.mockResolvedValue(bill());
 
