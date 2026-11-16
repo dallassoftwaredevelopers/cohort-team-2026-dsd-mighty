@@ -57,6 +57,17 @@ def _to_bill(row: dict[str, Any]) -> BillRead:
     )
 
 
+def _first_row(query: SyncSelectRequestBuilder) -> dict[str, Any] | None:
+    """Run a select and return its first row, or None if nothing matched.
+
+    Avoids .maybe_single(), which returns None instead of a response
+    when no row matches in current supabase-py/postgrest versions.
+    """
+    response = query.limit(1).execute()
+    rows = response.data or []
+    return rows[0] if rows else None
+
+
 def _get_bill_by_id(
     client: Client,
     bill_id: UUID,
@@ -209,21 +220,16 @@ def get_readable_bill(
     user_id: UUID,
 ) -> BillRead | None:
     """Return a readable bill, or None if missing or inaccessible."""
-    response = (
+    row = _first_row(
         _readable(
             client,
             BILL_COLUMNS,
             user_id,
             BillScope.all,
-        )
-        .eq("bill_id", str(bill_id))
-        .maybe_single()
-        .execute()
+        ).eq("bill_id", str(bill_id))
     )
 
-    row = response.data
-
-    if not isinstance(row, dict):
+    if row is None:
         return None
 
     return _to_bill(row)
@@ -276,16 +282,12 @@ def get_editable_draft(
     user_id: str,
 ) -> dict | None:
     """Return the caller's own editable draft."""
-    response = (
+    return _first_row(
         _editable(
             client.table("bills").select("*").eq("bill_id", str(bill_id)),
             user_id,
         )
-        .maybe_single()
-        .execute()
     )
-
-    return response.data
 
 
 # ---------------------------------------------------------
@@ -428,18 +430,14 @@ def get_own_bill_status(
 
     Another user's bill is treated as missing.
     """
-    response = (
+    row = _first_row(
         _filtered(
             client.table("bills").select("status").eq("bill_id", str(bill_id)),
             own_bills(user_id),
         )
-        .maybe_single()
-        .execute()
     )
 
-    row = response.data
-
-    if not isinstance(row, dict):
+    if row is None:
         return None
 
     return BillStatus(row["status"])
