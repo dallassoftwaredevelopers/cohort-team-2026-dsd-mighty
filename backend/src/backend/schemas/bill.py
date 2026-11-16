@@ -35,6 +35,9 @@ class BillBase(BaseModel):
     property_address: str | None = Field(default=None, max_length=300)
     account_status: AccountStatus | None = None
     website_name: str | None = Field(default=None, max_length=500)
+    # The vendor account the analyst picked. Omitted or null: the account
+    # whose number matches, if exactly one does (vendor_account_matching).
+    vendor_account_id: UUID | None = None
 
 
 class BillCreate(BillBase):
@@ -56,6 +59,7 @@ class BillUpdate(BaseModel):
     property_address: str | None = Field(default=None, min_length=1, max_length=300)
     account_status: AccountStatus | None = None
     website_name: str | None = Field(default=None, max_length=500)
+    vendor_account_id: UUID | None = None  # as in BillBase
 
 
 class BillRead(BaseModel):
@@ -77,7 +81,10 @@ class BillRead(BaseModel):
     property_address: str | None = None
     account_status: AccountStatus | None = None
     website_name: str | None = None
-    vendor_account_id: UUID | None = None  # None while the bill is unmatched
+    # All three None while the bill is unmatched.
+    vendor_account_id: UUID | None = None
+    vendor_id: UUID | None = None
+    property_id: UUID | None = None
     submitted_by: UserSummary
     status: BillStatus
     exception_reason: str | None = None
@@ -117,6 +124,9 @@ class BillDashboardRow(BaseModel):
     invoice_number: str | None = None
     property_address: str | None = None
     vendor_name_raw: str | None = None
+    # The matched vendor's and property's names; None while unmatched.
+    vendor_name: str | None = None
+    property_name: str | None = None
     invoice_date: date | None = None
     due_date: date | None = None
     # A JSON number, as the dashboard sums it for its totals (display only).

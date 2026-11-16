@@ -28,13 +28,37 @@ from postgrest.exceptions import APIError
 # (table, column) -> (referenced table, referenced column), as in the migrations.
 FOREIGN_KEYS = {
     ("bills", "submitted_by"): ("app_users", "user_id"),
+    ("bills", "vendor_account_id"): ("vendor_accounts", "account_id"),
+    ("bills", "vendor_id"): ("vendors", "vendor_id"),
+    ("bills", "property_id"): ("properties", "property_id"),
     ("vendor_accounts", "property_id"): ("properties", "property_id"),
     ("vendor_accounts", "vendor_id"): ("vendors", "vendor_id"),
 }
 
-# table -> column sets that must be unique together, as in the migrations.
-UNIQUE_KEYS = {
-    "vendor_accounts": [("property_id", "vendor_id", "account_number")],
+
+def _columns_key(*columns: str) -> Callable[[dict[str, Any]], tuple | None]:
+    def key(row: dict[str, Any]) -> tuple | None:
+        values = tuple(row.get(column) for column in columns)
+        # Postgres: a null in any indexed value never conflicts.
+        return None if None in values else values
+
+    return key
+
+
+def _bill_invoice_key(row: dict[str, Any]) -> tuple | None:
+    # bills_account_invoice_unique: (vendor_account_id,
+    # lower(btrim(invoice_number))) where vendor_account_id is not null.
+    account, invoice = row.get("vendor_account_id"), row.get("invoice_number")
+    if account is None or invoice is None:
+        return None
+    return (account, invoice.strip(" ").lower())
+
+
+# table -> unique index keys, as in the migrations: each gives a row's indexed
+# values, or None when the row is not in the index or holds a null.
+UNIQUE_KEYS: dict[str, list[Callable[[dict[str, Any]], tuple | None]]] = {
+    "vendor_accounts": [_columns_key("property_id", "vendor_id", "account_number")],
+    "bills": [_bill_invoice_key],
 }
 
 # alias:table!fk_column(col,col)
@@ -184,13 +208,13 @@ class _Query:
                             "message": f"{table}.{column} violates foreign key",
                         }
                     )
-        for columns in UNIQUE_KEYS.get(self._table, []):
-            key = tuple(row.get(column) for column in columns)
-            if any(tuple(other.get(c) for c in columns) == key for other in others):
+        for unique_key in UNIQUE_KEYS.get(self._table, []):
+            key = unique_key(row)
+            if key is not None and any(unique_key(other) == key for other in others):
                 raise APIError(
                     {
                         "code": "23505",
-                        "message": f"duplicate key on {self._table} {columns}",
+                        "message": f"duplicate key on {self._table} {key}",
                     }
                 )
 
