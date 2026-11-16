@@ -130,7 +130,10 @@ function mapDraftToFormValues(draft: BillDraftDetail): InvoiceFormValues {
     propertyAddress: draft.property_address ?? "",
     accountStatus: draft.account_status ?? "",
     websiteName: draft.website_name ?? "",
-    vendorAccountId: draft.vendor_account_id ?? "",
+    // Only the analyst's own pick comes back as one. An account the number
+    // found is left to the server, which matches the number again on save,
+    // so an account added or changed since is taken into account.
+    vendorAccountId: draft.vendor_account_picked ? (draft.vendor_account_id ?? "") : "",
   };
 }
 

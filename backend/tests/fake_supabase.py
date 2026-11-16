@@ -91,7 +91,12 @@ def _insert_defaults(table: str) -> dict[str, Any]:
             "status": "active",
             "created_at": now,
         }
-    return {"bill_id": str(uuid4()), "document_path": None, "created_at": now}
+    return {
+        "bill_id": str(uuid4()),
+        "document_path": None,
+        "vendor_account_picked": False,
+        "created_at": now,
+    }
 
 
 class _Query:
@@ -375,6 +380,7 @@ class FakeSupabase:
             "submitted_by": submitted_by,
             "status": "draft",
             "document_path": None,
+            "vendor_account_picked": False,
             "created_at": datetime.now(UTC).isoformat(),
             **fields,
         }

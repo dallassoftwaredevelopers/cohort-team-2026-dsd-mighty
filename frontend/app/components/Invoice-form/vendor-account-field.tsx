@@ -14,6 +14,8 @@ const CHANGE = "Change";
 const KEEP_CURRENT = "Keep current";
 const LEAVE_FOR_LATER = "Leave for later";
 const LOADING = "Loading vendor accounts...";
+const PICKED = "Picked by you";
+const MATCHED_BY_NUMBER = "Matched by account number";
 const NO_MATCH = "No vendor account has this account number. Pick one, or leave it for later.";
 
 function severalMatch(count: number): string {
@@ -34,12 +36,14 @@ type VendorAccountFieldProps = {
 };
 
 // Shows which vendor account the bill goes to. A picked account, or else the
-// one account whose number matches, shows as matched with "Change". With no
-// match, or several, a select offers every account or the candidates.
+// one account whose number matches, shows as matched with "Change", saying
+// which of the two it is. With no match, or several, a select offers every
+// account or the candidates.
 export function VendorAccountField({ accountNumber, value, onChange }: VendorAccountFieldProps) {
   const [accounts, setAccounts] = useState<VendorAccountOption[] | null>(null);
-  // The accounts the last looked-up account number matched.
-  const [lookup, setLookup] = useState<VendorAccountOption[] | null>(null);
+  // The accounts the last looked-up account number matched: null with no
+  // number, undefined until the first lookup answers.
+  const [lookup, setLookup] = useState<VendorAccountOption[] | null | undefined>(undefined);
   const [error, setError] = useState("");
   const [changing, setChanging] = useState(false);
   const wanted = accountNumber.trim();
@@ -107,8 +111,12 @@ export function VendorAccountField({ accountNumber, value, onChange }: VendorAcc
   const matches = wanted && lookup ? lookup : [];
   const autoMatch = matches.length === 1 ? matches[0] : undefined;
   const shown = value ? picked : autoMatch;
+  // A pick waits for the account list. A number the field opened with (a
+  // reopened draft) waits for its first lookup, so the select does not
+  // flash before the match shows. Later lookups keep the last answer.
+  const loading = !error && (value ? accounts === null : wanted !== "" && lookup === undefined);
 
-  if (value && accounts === null && !error) {
+  if (loading) {
     return (
       <FormField label={LABEL} htmlFor="vendorAccount">
         {(field) => (
@@ -133,6 +141,9 @@ export function VendorAccountField({ accountNumber, value, onChange }: VendorAcc
                 </span>
                 <span className="block wrap-break-word text-foreground-muted">
                   {`${shown.account_number} · ${shown.property_name}`}
+                </span>
+                <span className="mt-0.5 block text-xs text-foreground-muted">
+                  {value ? PICKED : MATCHED_BY_NUMBER}
                 </span>
               </span>
             </output>

@@ -85,6 +85,9 @@ class BillRead(BaseModel):
     vendor_account_id: UUID | None = None
     vendor_id: UUID | None = None
     property_id: UUID | None = None
+    # True when the analyst picked the vendor account; false when the account
+    # number found it, or nothing did (vendor_account_matching).
+    vendor_account_picked: bool
     submitted_by: UserSummary
     status: BillStatus
     exception_reason: str | None = None
@@ -114,6 +117,9 @@ class BillDraftDetail(BillDraftCreate):
     bill_id: UUID
     status: BillStatus
     document_path: str | None = None
+    # As in BillRead. The form sends `vendor_account_id` back only when this
+    # is true, so a match the number found is worked out again on save.
+    vendor_account_picked: bool
 
 
 class BillDashboardRow(BaseModel):

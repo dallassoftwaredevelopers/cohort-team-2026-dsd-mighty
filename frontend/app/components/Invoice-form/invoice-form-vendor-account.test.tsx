@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   extractBill,
@@ -70,6 +70,8 @@ const matchesFor: Record<string, VendorAccountOption[]> = {
 };
 
 const NO_MATCH = "No vendor account has this account number. Pick one, or leave it for later.";
+const PICKED = "Picked by you";
+const MATCHED_BY_NUMBER = "Matched by account number";
 
 function vendorAccount() {
   return screen.getByLabelText("Vendor account");
@@ -128,7 +130,32 @@ function draft(overrides: Partial<BillDraftDetail> = {}): BillDraftDetail {
     account_status: null,
     website_name: null,
     vendor_account_id: null,
+    vendor_account_picked: false,
     ...overrides,
+  };
+}
+
+// A draft with every field Create needs.
+function completeDraft(overrides: Partial<BillDraftDetail> = {}): BillDraftDetail {
+  return draft({
+    vendor_name_raw: "Alder Creek",
+    invoice_date: "2026-10-01",
+    due_date: "2026-10-31",
+    amount: "250.00",
+    description: "Landscaping",
+    property_address: "125 Industrial Way",
+    ...overrides,
+  });
+}
+
+async function saveDraftAndCreate(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Save Draft" }));
+  await screen.findByRole("button", { name: "Draft Saved ✓" });
+  await user.click(screen.getByRole("button", { name: "Create" }));
+  await waitFor(() => expect(push).toHaveBeenCalledWith("/dashboard"));
+  return {
+    saved: mockUpdateBillDraft.mock.calls[0][1].vendor_account_id,
+    submitted: mockSubmitBill.mock.calls[0][1].vendor_account_id,
   };
 }
 
@@ -161,6 +188,8 @@ describe("InvoiceForm vendor account", () => {
 
     const matched = await findMatched("Alder Creek Landscaping");
     expect(matched).toHaveTextContent("2000456700 · 125 Industrial Way");
+    expect(matched).toHaveTextContent(MATCHED_BY_NUMBER);
+    expect(matched).not.toHaveTextContent(PICKED);
     expect(screen.getByRole("button", { name: "Change" })).toBeInTheDocument();
     expect(mockLookUp).toHaveBeenCalledWith("2000-456700", expect.any(AbortSignal));
     expect(screen.queryByText(NO_MATCH)).not.toBeInTheDocument();
@@ -220,6 +249,7 @@ describe("InvoiceForm vendor account", () => {
 
     const matched = await findMatched("Brightwater Water & Sewer");
     expect(matched).toHaveTextContent("Oak Row");
+    expect(matched).toHaveTextContent(PICKED);
     await user.click(screen.getByRole("button", { name: "Save Draft" }));
     await screen.findByRole("button", { name: "Draft Saved ✓" });
     expect(mockSaveBillDraft.mock.calls[0][0]).toMatchObject({ vendor_account_id: "acc-3" });
@@ -338,17 +368,92 @@ describe("InvoiceForm vendor account", () => {
     expect(screen.getByLabelText("Account / Customer #")).toHaveValue("2000456700");
   });
 
-  it("reopens a draft with its saved account", async () => {
+  it("reopens a draft with the account picked by hand, and sends it again", async () => {
+    const user = userEvent.setup();
     mockPathname = "/invoices/bill-1/edit";
-    // Saved with an account picked by hand: its number matches nothing.
+    // Its number matches another account: the pick still wins.
     mockGetBillDraft.mockResolvedValue(
-      draft({ account_number_raw: "9999", vendor_account_id: "acc-2" }),
+      completeDraft({ vendor_account_id: "acc-2", vendor_account_picked: true }),
     );
 
     render(<InvoiceForm />);
 
     const matched = await findMatched("Brightwater Water & Sewer");
     expect(matched).toHaveTextContent("2000456701 · 125 Industrial Way");
+    expect(matched).toHaveTextContent(PICKED);
+    expect(await saveDraftAndCreate(user)).toEqual({ saved: "acc-2", submitted: "acc-2" });
+  });
+
+  it("reopens a draft matched by its number as matched, and leaves it to the server", async () => {
+    const user = userEvent.setup();
+    mockPathname = "/invoices/bill-1/edit";
+    mockGetBillDraft.mockResolvedValue(completeDraft({ vendor_account_id: "acc-1" }));
+
+    render(<InvoiceForm />);
+
+    const matched = await findMatched("Alder Creek Landscaping");
+    expect(matched).toHaveTextContent(MATCHED_BY_NUMBER);
+    expect(matched).not.toHaveTextContent(PICKED);
+    expect(await saveDraftAndCreate(user)).toEqual({ saved: null, submitted: undefined });
+  });
+
+  it("shows what the number finds now, not a stale match the number found", async () => {
+    const user = userEvent.setup();
+    mockPathname = "/invoices/bill-1/edit";
+    // Matched to Alder when saved; since then a second account has the same
+    // number, so the server would leave it unmatched.
+    mockGetBillDraft.mockResolvedValue(
+      completeDraft({ account_number_raw: "2000456701", vendor_account_id: "acc-1" }),
+    );
+
+    render(<InvoiceForm />);
+
+    expect(
+      await screen.findByText(
+        "2 vendor accounts have this account number. Pick one, or leave it for later.",
+      ),
+    ).toBeInTheDocument();
+    expect(vendorAccount()).toHaveValue("");
+    expect(optionNames()).not.toContain(
+      "Alder Creek Landscaping · 2000456700 · 125 Industrial Way",
+    );
+    expect(await saveDraftAndCreate(user)).toEqual({ saved: null, submitted: undefined });
+  });
+
+  it("shows the account the number finds now when it differs from the saved match", async () => {
+    mockPathname = "/invoices/bill-1/edit";
+    mockGetBillDraft.mockResolvedValue(completeDraft({ vendor_account_id: "acc-2" }));
+
+    render(<InvoiceForm />);
+
+    const matched = await findMatched("Alder Creek Landscaping");
+    expect(matched).toHaveTextContent(MATCHED_BY_NUMBER);
+  });
+
+  it("waits for the reopened number's lookup instead of showing the select", async () => {
+    mockPathname = "/invoices/bill-1/edit";
+    mockGetBillDraft.mockResolvedValue(completeDraft({ vendor_account_id: "acc-1" }));
+    let answer: (matches: VendorAccountOption[]) => void = () => {};
+    mockLookUp.mockImplementation((accountNumber) =>
+      accountNumber === undefined
+        ? Promise.resolve(everyAccount)
+        : new Promise((resolve) => {
+            answer = resolve;
+          }),
+    );
+
+    render(<InvoiceForm />);
+
+    await waitFor(() =>
+      expect(mockLookUp).toHaveBeenCalledWith("2000456700", expect.any(AbortSignal)),
+    );
+    expect(vendorAccount().tagName).toBe("OUTPUT");
+    expect(vendorAccount()).toHaveTextContent("Loading vendor accounts...");
+    expect(screen.queryByRole("combobox", { name: "Vendor account" })).not.toBeInTheDocument();
+
+    act(() => answer([alder]));
+
+    await findMatched("Alder Creek Landscaping");
   });
 
   it("never takes a duplicate invoice 409 for its own earlier submit", async () => {

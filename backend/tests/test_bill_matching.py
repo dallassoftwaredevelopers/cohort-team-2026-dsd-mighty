@@ -151,6 +151,7 @@ def test_exactly_one_matching_account_is_the_match(db, account, path):
 
     assert response.status_code in (200, 201), response.text
     assert match_of(row) == matched_to(account)
+    assert row["vendor_account_picked"] is False
 
 
 @pytest.mark.parametrize("path", WRITE_PATHS)
@@ -159,6 +160,7 @@ def test_no_matching_account_leaves_the_bill_unmatched(db, account, path):
 
     assert response.status_code in (200, 201), response.text
     assert match_of(row) == UNMATCHED
+    assert row["vendor_account_picked"] is False
 
 
 @pytest.mark.parametrize("path", WRITE_PATHS)
@@ -202,6 +204,33 @@ def test_the_analysts_pick_wins_over_the_account_number(db, account, path):
 
     assert response.status_code in (200, 201), response.text
     assert match_of(row) == matched_to(picked)
+    assert row["vendor_account_picked"] is True
+
+
+@pytest.mark.parametrize("path", ["update", "submit"])
+def test_a_write_without_a_pick_marks_the_match_not_picked(db, account, path):
+    other = db.add_vendor_account(
+        db.add_property("Oak Row")["property_id"], account["vendor_id"]
+    )
+    draft = db.add_bill(
+        USER_A,
+        account_number_raw=BILL["account_number_raw"],
+        vendor_account_id=other["account_id"],
+        vendor_id=other["vendor_id"],
+        property_id=other["property_id"],
+        vendor_account_picked=True,
+    )
+    client = as_user()
+    url = f"/bills/{draft['bill_id']}"
+
+    if path == "update":
+        response = client.patch(f"{url}/draft", json={"vendor_account_id": None})
+    else:
+        response = client.post(f"{url}/submit", json=BILL)
+
+    assert response.status_code == 200, response.text
+    assert match_of(draft) == matched_to(account)
+    assert draft["vendor_account_picked"] is False
 
 
 @pytest.mark.parametrize("path", WRITE_PATHS)
@@ -241,21 +270,31 @@ def test_a_not_a_uuid_pick_is_422(db, account):
 
 def test_bill_reads_return_the_match(db, account):
     created = create().json()
+    picked = create(
+        {**BILL, "invoice_number": "INV-2", "vendor_account_id": account["account_id"]}
+    ).json()
 
-    assert match_of(created) == matched_to(account)
-    for body in (
-        as_user().get(f"/bills/{created['id']}").json(),
-        as_user().get("/bills").json()[0],
-    ):
-        assert match_of(body) == matched_to(account)
+    listed = {row["id"]: row for row in as_user().get("/bills").json()}
+
+    for bill, was_picked in ((created, False), (picked, True)):
+        assert match_of(bill) == matched_to(account)
+        assert bill["vendor_account_picked"] is was_picked
+        for body in (as_user().get(f"/bills/{bill['id']}").json(), listed[bill["id"]]):
+            assert match_of(body) == matched_to(account)
+            assert body["vendor_account_picked"] is was_picked
 
 
-def test_a_reopened_draft_returns_its_vendor_account(db, account):
-    draft_id = save_draft().json()["bill_id"]
+@pytest.mark.parametrize("was_picked", [False, True])
+def test_a_reopened_draft_returns_its_vendor_account_and_how_it_was_set(
+    db, account, was_picked
+):
+    pick = {"vendor_account_id": account["account_id"]} if was_picked else {}
+    draft_id = save_draft({**BILL, **pick}).json()["bill_id"]
 
     draft = as_user().get(f"/bills/{draft_id}/draft").json()
 
     assert draft["vendor_account_id"] == account["account_id"]
+    assert draft["vendor_account_picked"] is was_picked
 
 
 # Draft updates are partial.
@@ -296,6 +335,91 @@ def test_clearing_the_pick_matches_the_stored_number_again(db, account):
     assert patch_draft(draft_id, {"vendor_account_id": None}).status_code == 200
 
     assert match_of(db.tables["bills"][0]) == matched_to(account)
+
+
+# A match the number found is worked out again; a pick stays.
+
+
+def add_same_number_account(db, account) -> dict:
+    """A second active account with `account`'s number: the number is now
+    ambiguous, so the rule leaves a bill with it unmatched."""
+    return db.add_vendor_account(
+        db.add_property("Oak Row")["property_id"],
+        db.add_vendor("Brightwater")["vendor_id"],
+        account_number=account["account_number"],
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        # Save Draft from the form: every field, the pick left null.
+        ("update", {**BILL, "vendor_account_id": None}),
+        # Any other save: the number and the pick are not sent.
+        ("update", {"amount": "300.00"}),
+        ("update", {}),
+        # Create from the form: no pick.
+        ("submit", BILL),
+    ],
+)
+def test_a_found_match_that_is_now_ambiguous_ends_unmatched(db, account, path, body):
+    draft_id = save_draft().json()["bill_id"]
+    (row,) = db.tables["bills"]
+    assert match_of(row) == matched_to(account)
+    add_same_number_account(db, account)
+    reopened = as_user().get(f"/bills/{draft_id}/draft").json()
+    assert reopened["vendor_account_picked"] is False
+
+    if path == "update":
+        response = patch_draft(draft_id, body)
+    else:
+        response = as_user().post(f"/bills/{draft_id}/submit", json=body)
+
+    assert response.status_code == 200, response.text
+    assert match_of(row) == UNMATCHED
+    assert row["vendor_account_picked"] is False
+
+
+def test_a_found_match_follows_the_account_the_number_now_finds(db, account):
+    draft_id = save_draft().json()["bill_id"]
+    account["status"] = "inactive"
+    replacement = add_same_number_account(db, account)
+
+    assert patch_draft(draft_id, {"amount": "300.00"}).status_code == 200
+
+    assert match_of(db.tables["bills"][0]) == matched_to(replacement)
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        # Save Draft from the form sends the pick back.
+        ("update", "pick"),
+        # A save that does not send the number or the pick keeps it.
+        ("update", {"amount": "300.00"}),
+        ("update", {}),
+        # Create from the form sends the pick back.
+        ("submit", "pick"),
+    ],
+)
+def test_a_pick_survives_reopening(db, account, path, body):
+    add_same_number_account(db, account)
+    pick = {**BILL, "vendor_account_id": account["account_id"]}
+    draft_id = save_draft(pick).json()["bill_id"]
+    reopened = as_user().get(f"/bills/{draft_id}/draft").json()
+    assert reopened["vendor_account_id"] == account["account_id"]
+    assert reopened["vendor_account_picked"] is True
+
+    body = pick if body == "pick" else body
+    if path == "update":
+        response = patch_draft(draft_id, body)
+    else:
+        response = as_user().post(f"/bills/{draft_id}/submit", json=body)
+
+    assert response.status_code == 200, response.text
+    (row,) = db.tables["bills"]
+    assert match_of(row) == matched_to(account)
+    assert row["vendor_account_picked"] is True
 
 
 def test_an_update_to_another_users_draft_is_404_and_changes_nothing(db, account):

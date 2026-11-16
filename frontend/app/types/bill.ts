@@ -45,6 +45,9 @@ export type Bill = {
   vendor_account_id: string | null;
   vendor_id: string | null;
   property_id: string | null;
+  // true: the analyst picked the vendor account. false: the account number
+  // found it, or nothing did.
+  vendor_account_picked: boolean;
   submitted_by: { id: string; full_name: string };
   status: BillStatus;
   exception_reason: string | null;
@@ -100,6 +103,9 @@ export type BillDraftDetail = {
   account_status: AccountStatus | null;
   website_name: string | null;
   vendor_account_id: string | null;
+  // As on Bill. Only a picked account is sent back on save: the server
+  // matches the account number again otherwise.
+  vendor_account_picked: boolean;
 };
 
 export type DashboardBill = {

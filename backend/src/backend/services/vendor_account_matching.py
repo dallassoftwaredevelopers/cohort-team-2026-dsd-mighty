@@ -9,7 +9,10 @@ removed, so "2000-4567 00" matches "2000456700". Only active accounts count.
 - Otherwise (none, or several): no match; the bill stays unmatched.
 
 A matched bill points at the account and at the account's vendor and
-property; an unmatched bill has all three null.
+property; an unmatched bill has all three null. `vendor_account_picked` says
+whether the analyst picked the account (true) or the number found it, or
+nothing did (false). A reopened draft sends back only a picked account, so a
+match the number found is worked out again on the next save.
 """
 
 import re
@@ -22,10 +25,11 @@ from supabase import Client
 
 NOT_LETTER_OR_DIGIT = re.compile(r"[^0-9a-z]")
 
-UNMATCHED: dict[str, str | None] = {
+UNMATCHED: dict[str, str | bool | None] = {
     "vendor_account_id": None,
     "vendor_id": None,
     "property_id": None,
+    "vendor_account_picked": False,
 }
 
 
@@ -58,8 +62,9 @@ def match_columns(
     client: Client,
     account_number: str | None,
     picked_account_id: UUID | None,
-) -> dict[str, str | None]:
-    """The bill's `vendor_account_id`, `vendor_id` and `property_id`.
+) -> dict[str, str | bool | None]:
+    """The bill's `vendor_account_id`, `vendor_id`, `property_id` and
+    `vendor_account_picked`.
 
     Raises UnusableVendorAccount when the picked account cannot be used.
     """
@@ -73,6 +78,7 @@ def match_columns(
             "vendor_account_id": str(account["id"]),
             "vendor_id": str(account["vendor_id"]),
             "property_id": str(account["property_id"]),
+            "vendor_account_picked": True,
         }
 
     matches = same_account_number(
@@ -86,4 +92,5 @@ def match_columns(
         "vendor_account_id": match["id"],
         "vendor_id": match["vendor_id"],
         "property_id": match["property_id"],
+        "vendor_account_picked": False,
     }
