@@ -12,7 +12,6 @@ from backend.schemas.bill import (
 from backend.services.bill_access import (
     BillScope,
     editable_bills,
-    own_bills,
     readable_bills,
 )
 from supabase import Client
@@ -379,7 +378,7 @@ def submit_draft_with_approval(
     bill_id: UUID,
     user_id: UUID,
     fields: BillCreate,
-) -> BillRead | None:
+) -> BillRead:
     """Submit an existing draft and create its pending approval.
 
     The database RPC must:
@@ -391,8 +390,6 @@ def submit_draft_with_approval(
     - Preserve the existing document_path.
     - Insert one pending approval record.
     - Return the existing bill UUID.
-
-    Returns None if the RPC returns no bill ID.
     """
     payload = fields.model_dump(mode="json")
 
@@ -406,7 +403,7 @@ def submit_draft_with_approval(
     ).execute()
 
     if response.data is None:
-        return None
+        raise RuntimeError("Draft submission did not return a bill ID.")
 
     submitted_bill_id = UUID(str(response.data))
 
@@ -414,30 +411,3 @@ def submit_draft_with_approval(
         client,
         submitted_bill_id,
     )
-
-
-# ---------------------------------------------------------
-# Bill ownership and status
-# ---------------------------------------------------------
-
-
-def get_own_bill_status(
-    client: Client,
-    bill_id: UUID,
-    user_id: str,
-) -> BillStatus | None:
-    """Return the status of a bill submitted by this user.
-
-    Another user's bill is treated as missing.
-    """
-    row = _first_row(
-        _filtered(
-            client.table("bills").select("status").eq("bill_id", str(bill_id)),
-            own_bills(user_id),
-        )
-    )
-
-    if row is None:
-        return None
-
-    return BillStatus(row["status"])

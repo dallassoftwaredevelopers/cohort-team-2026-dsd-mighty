@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from postgrest.exceptions import APIError
+
 # (table, column) -> (referenced table, referenced column), as in the migrations.
 FOREIGN_KEYS = {
     ("bills", "submitted_by"): ("app_users", "user_id"),
@@ -34,6 +36,11 @@ OPERATORS: dict[str, Callable[[Any, str], bool]] = {
     # SQL: NULL <> 'x' is not true, so a null never matches neq either.
     "neq": lambda stored, value: stored is not None and str(stored) != value,
 }
+
+
+def _sql_error(message: str, code: str) -> APIError:
+    """The error PostgREST raises for a RAISE EXCEPTION ... USING ERRCODE."""
+    return APIError({"message": message, "code": code, "hint": None, "details": None})
 
 
 class _Result:
@@ -111,6 +118,16 @@ class _Rpc:
             decision = self._params["p_decision"]
             comments = self._params.get("p_comments")
 
+            if decision not in {"approve", "reject"}:
+                raise _sql_error("Invalid approval decision.", "22023")
+
+            comments = comments.strip() if comments else None
+
+            if decision == "reject" and not comments:
+                raise _sql_error(
+                    "A comment is required when rejecting an approval.", "22023"
+                )
+
             approval = self._db.find(
                 "approvals",
                 "approval_id",
@@ -118,7 +135,10 @@ class _Rpc:
             )
 
             if approval is None:
-                raise ValueError("Approval record not found.")
+                raise _sql_error("Approval record not found.", "P0002")
+
+            if approval["approval_status"] != "pending":
+                raise _sql_error("This approval has already been decided.", "P0001")
 
             bill = self._db.find(
                 "bills",
@@ -127,13 +147,10 @@ class _Rpc:
             )
 
             if bill is None:
-                raise ValueError("Associated bill not found.")
-
-            if approval["approval_status"] != "pending":
-                raise ValueError("This approval has already been decided.")
+                raise _sql_error("Associated bill not found.", "P0002")
 
             if bill["status"] != "pending_approval":
-                raise ValueError("This bill is not awaiting approval.")
+                raise _sql_error("This bill is not awaiting approval.", "P0001")
 
             reviewer = self._db.find(
                 "app_users",
@@ -142,13 +159,13 @@ class _Rpc:
             )
 
             if reviewer is None:
-                raise ValueError("Reviewer account not found.")
+                raise _sql_error("Reviewer account not found.", "P0002")
 
             if reviewer["status"] != "active":
-                raise ValueError("Reviewer account is not active.")
+                raise _sql_error("Reviewer account is not active.", "42501")
 
             if reviewer["role"] not in {"approver", "admin"}:
-                raise ValueError("User is not authorized to review approvals.")
+                raise _sql_error("User is not authorized to review approvals.", "42501")
 
             amount = bill.get("amount")
 
@@ -157,15 +174,7 @@ class _Rpc:
                 and float(amount) > 5000
                 and reviewer["role"] != "admin"
             ):
-                raise ValueError("An admin must review bills over $5,000.")
-
-            if decision not in {"approve", "reject"}:
-                raise ValueError("Invalid approval decision.")
-
-            comments = comments.strip() if comments else None
-
-            if decision == "reject" and not comments:
-                raise ValueError("A comment is required when rejecting an approval.")
+                raise _sql_error("An admin must review bills over $5,000.", "42501")
 
             decision_at = datetime.now(UTC).isoformat()
             approval_status = "approved" if decision == "approve" else "rejected"
@@ -520,27 +529,19 @@ class FakeSupabase:
         bill_id: str,
         fields: dict[str, Any],
         user_id: str,
-    ) -> str | None:
+    ) -> str:
         """Simulate atomic submission of an existing draft."""
 
         bill = self.find("bills", "bill_id", bill_id)
 
-        # Hide missing bills and bills belonging to another user.
-        if bill is None or bill["submitted_by"] != user_id:
-            return None
+        if bill is None:
+            raise _sql_error("Editable draft not found.", "P0002")
 
-        # Only an existing draft can be submitted.
+        if bill["submitted_by"] != user_id:
+            raise _sql_error("Editable draft not found.", "42501")
+
         if bill["status"] != "draft":
-            return None
-
-        # Match the database's partial unique index.
-        existing_pending = any(
-            approval["bill_id"] == bill_id and approval["approval_status"] == "pending"
-            for approval in self.tables.get("approvals", [])
-        )
-
-        if existing_pending:
-            return None
+            raise _sql_error("This bill has already been submitted.", "P0001")
 
         now = datetime.now(UTC).isoformat()
 
@@ -586,21 +587,13 @@ class FakeSupabase:
         bill = self.find("bills", "bill_id", bill_id)
 
         if bill is None:
-            raise ValueError("Bill not found.")
+            raise _sql_error("Bill not found.", "P0002")
 
         if bill["submitted_by"] != user_id:
-            raise ValueError("You are not authorized to resubmit this bill.")
+            raise _sql_error("You are not authorized to resubmit this bill.", "42501")
 
         if bill["status"] != "rejected":
-            raise ValueError("Only rejected bills can be resubmitted.")
-
-        existing_pending = any(
-            approval["bill_id"] == bill_id and approval["approval_status"] == "pending"
-            for approval in self.tables.get("approvals", [])
-        )
-
-        if existing_pending:
-            raise ValueError("This bill already has a pending approval.")
+            raise _sql_error("Only rejected bills can be resubmitted.", "P0001")
 
         now = datetime.now(UTC).isoformat()
 
