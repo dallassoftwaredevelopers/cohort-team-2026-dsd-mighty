@@ -737,6 +737,14 @@ function InvoiceFormVisit({
         </p>
       )}
 
+      {isResubmission && (
+        <p role="status" className="text-sm text-foreground-muted">
+          {storedPdf.kind === "earlier"
+            ? "The existing invoice PDF will be retained when you resubmit this invoice."
+            : "No invoice PDF is currently stored with this invoice."}
+        </p>
+      )}
+
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-3xl font-semibold tracking-tight text-foreground">
           {isResubmission ? "Resubmit Rejected Invoice" : draftId ? "Edit Draft" : "New Invoice"}
