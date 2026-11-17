@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main]
   push:
@@ -31,8 +32,178 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
+      - name: Install Chromium for the payment agent's browser tests
+        run: uv run playwright install --with-deps chromium
+
       - name: Run backend tests
         run: uv run pytest -v
+
+      - name: Check Ruff linting
+        run: uv run ruff check .
+
+      - name: Check Ruff formatting
+        run: uv run ruff format --check .
+
+  database:
+    name: Database (Supabase migrations + pgTAP)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v3
+        with:
+          version: 3.0.0
+      - name: Start database and apply migrations
+        # Postgres plus Auth, PostgREST and the Kong gateway: the audit actor
+        # test needs the real API in front of the database. Nothing else.
+        run: supabase start -x realtime,storage-api,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "backend/uv.lock"
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Prove the actor header reaches the audit trigger (real PostgREST)
+        run: |
+          eval "$(supabase status -o env)"
+          SUPABASE_URL="$API_URL" \
+          SUPABASE_PUBLISHABLE_KEY="$PUBLISHABLE_KEY" \
+          SUPABASE_SECRET_KEY="$SECRET_KEY" \
+          DATABASE_URL="$DB_URL" \
+          RUN_LOCAL_SUPABASE_TESTS=1 \
+            uv run pytest tests/test_audit_actor_live.py -v -rs --junitxml=audit-actor-live.xml
+      - name: Fail unless every audit actor test ran
+        # A skip passes pytest but tests nothing, e.g. if an opt-in variable never
+        # reached it. The fixed count also catches a test that stops being collected.
+        run: |
+          python - <<'EOF'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          EXPECTED_TESTS = 3  # the tests in tests/test_audit_actor_live.py
+
+          report = Path("audit-actor-live.xml")
+          if not report.is_file():
+              raise SystemExit("pytest wrote no JUnit report (audit-actor-live.xml)")
+          root = ET.parse(report).getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          if suite is None:
+              raise SystemExit("audit-actor-live.xml has no <testsuite>, so the tests can't be counted")
+          tests, skipped = int(suite.get("tests", 0)), int(suite.get("skipped", 0))
+          print(f"{tests} audit actor tests, {skipped} skipped (expected {EXPECTED_TESTS}, none skipped)")
+          if tests != EXPECTED_TESTS or skipped:
+              raise SystemExit(
+                  f"Expected {EXPECTED_TESTS} audit actor tests with no skips; "
+                  f"found {tests} tests and {skipped} skipped. "
+                  "If you added or removed a test in that file, update EXPECTED_TESTS in ci.yml."
+              )
+          EOF
+      - name: Run pgTAP tests
+        run: supabase test db
+      - name: Compare audit_events with the schemas (running database)
+        run: |
+          eval "$(supabase status -o env)"
+          DATABASE_URL="$DB_URL" \
+            uv run pytest tests/test_audit_event_schema.py -v -rs --junitxml=audit-event-schema.xml
+      - name: Fail unless every schema comparison ran
+        # A skip passes pytest but tests nothing, e.g. if DATABASE_URL never reached
+        # it. The fixed count also catches a test that stops being collected.
+        run: |
+          python - <<'EOF'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          EXPECTED_TESTS = 4  # the tests in tests/test_audit_event_schema.py
+
+          report = Path("audit-event-schema.xml")
+          if not report.is_file():
+              raise SystemExit("pytest wrote no JUnit report (audit-event-schema.xml)")
+          root = ET.parse(report).getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          if suite is None:
+              raise SystemExit("audit-event-schema.xml has no <testsuite>, so the tests can't be counted")
+          tests, skipped = int(suite.get("tests", 0)), int(suite.get("skipped", 0))
+          print(f"{tests} schema comparison tests, {skipped} skipped (expected {EXPECTED_TESTS}, none skipped)")
+          if tests != EXPECTED_TESTS or skipped:
+              raise SystemExit(
+                  f"Expected {EXPECTED_TESTS} schema comparison tests with no skips; "
+                  f"found {tests} tests and {skipped} skipped. "
+                  "If you added or removed a test in that file, update EXPECTED_TESTS in ci.yml."
+              )
+          EOF
+
+  backend-real-login:
+    name: Backend real-login (local Supabase)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v3
+        with:
+          version: 3.0.0
+      - name: Start Auth, REST and the database
+        # Only what the tests reach: Postgres, Auth (gotrue), PostgREST and the Kong gateway.
+        run: supabase start -x realtime,storage-api,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "backend/uv.lock"
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Run real-login tests
+        run: |
+          eval "$(supabase status -o env)"
+          SUPABASE_URL="$API_URL" \
+          SUPABASE_PUBLISHABLE_KEY="$PUBLISHABLE_KEY" \
+          SUPABASE_SECRET_KEY="$SECRET_KEY" \
+          RUN_LOCAL_SUPABASE_TESTS=1 \
+            uv run pytest tests/test_auth_local_supabase.py -v -rs --junitxml=real-login.xml
+      - name: Fail unless every real-login test ran
+        # A skip passes pytest but tests nothing, e.g. if the opt-in variable never reached it.
+        # The fixed count also catches a test that stops being collected.
+        run: |
+          python - <<'EOF'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          EXPECTED_TESTS = 6  # the tests in tests/test_auth_local_supabase.py
+
+          report = Path("real-login.xml")
+          if not report.is_file():
+              raise SystemExit("pytest wrote no JUnit report (real-login.xml)")
+          root = ET.parse(report).getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          if suite is None:
+              raise SystemExit("real-login.xml has no <testsuite>, so the tests can't be counted")
+          tests, skipped = int(suite.get("tests", 0)), int(suite.get("skipped", 0))
+          print(f"{tests} real-login tests, {skipped} skipped (expected {EXPECTED_TESTS}, none skipped)")
+          if tests != EXPECTED_TESTS or skipped:
+              raise SystemExit(
+                  f"Expected {EXPECTED_TESTS} real-login tests with no skips; "
+                  f"found {tests} tests and {skipped} skipped. "
+                  "If you added or removed a real-login test, update EXPECTED_TESTS in ci.yml."
+              )
+          EOF
+
+
   frontend:
     name: Frontend (Next.js + React)
     runs-on: ubuntu-latest
@@ -56,5 +227,91 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Run frontend tests
         run: pnpm test --passWithNoTests
-      - name: Check Prettier formatting
-        run: pnpm format:check
+
+  frontend-lint:
+    name: Frontend Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run Biome
+        run: pnpm lint
+
+  frontend-type-check:
+    name: Frontend Type Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run type-check
+        run: pnpm run type-check
+
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build frontend
+        run: pnpm build
+        env: 
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
+  enforcement:
+    name: Enforcement Table
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check enforcement table
+        run: node scripts/check-enforcement.mjs

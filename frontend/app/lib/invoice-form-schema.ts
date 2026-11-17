@@ -1,0 +1,138 @@
+import { z } from "zod";
+
+export const accountStatuses = ["", "paid", "unpaid", "outstanding"] as const;
+
+const money = /^\d{1,10}(\.\d{1,2})?$/;
+const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+
+// An amount the form accepts: up to 10 digits and at most 2 decimals, no sign.
+export function isMoney(value: string): boolean {
+  return money.test(value);
+}
+
+// A real calendar date written as YYYY-MM-DD, the format of <input type="date">.
+export function isValidIsoDate(value: string): boolean {
+  if (!isoDate.test(value)) return false;
+
+  const date = new Date(`${value}T00:00:00.000Z`);
+
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+// A full web address the Website Name field accepts: http or https.
+export function isWebsite(value: string): boolean {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export const invoiceFormSchema = z
+  .object({
+    accountNumber: z.string().trim().min(1, "Account / customer # is required"),
+    statementId: z.string().trim().min(1, "Statement # is required"),
+    companyName: z.string().trim().min(1, "Customer / business name is required"),
+    propertyAddress: z.string().trim().min(1, "Property address is required"),
+    issueDate: z.string().regex(isoDate, "Issue date is required"),
+    dueDate: z.string().regex(isoDate, "Due date is required"),
+    description: z.string().trim().min(1, "Add a short description"),
+    previousPayments: z
+      .string()
+      .trim()
+      .refine((v) => v === "" || money.test(v), "Enter an amount like 1180.50"),
+    currentDue: z
+      .string()
+      .trim()
+      .regex(money, "Enter an amount like 1180.50")
+      .refine((v) => Number(v) > 0, "Amount must be greater than 0"),
+    accountStatus: z.enum(accountStatuses),
+    notes: z.string().trim(),
+    websiteName: z
+      .string()
+      .trim()
+      .refine((v) => v === "" || isWebsite(v), "Enter a full URL like https://domainname.com"),
+    // The vendor account the analyst picked; "" leaves it to the server's
+    // account number match.
+    vendorAccountId: z.string(),
+  })
+  .refine((v) => v.dueDate >= v.issueDate, {
+    message: "Due date can't be before the issue date",
+    path: ["dueDate"],
+  });
+
+export type InvoiceFormValues = z.infer<typeof invoiceFormSchema>;
+
+export const emptyInvoiceForm: InvoiceFormValues = {
+  accountNumber: "",
+  statementId: "",
+  companyName: "",
+  propertyAddress: "",
+  issueDate: "",
+  dueDate: "",
+  description: "",
+  previousPayments: "",
+  currentDue: "",
+  accountStatus: "",
+  notes: "",
+  websiteName: "",
+  vendorAccountId: "",
+};
+
+export const invoiceDraftFormSchema = z
+  .object({
+    accountNumber: z.string().trim(),
+    statementId: z.string().trim(),
+    companyName: z.string().trim(),
+    propertyAddress: z.string().trim(),
+    issueDate: z
+      .string()
+      .refine((value) => value === "" || isValidIsoDate(value), "Enter a valid issue date"),
+    dueDate: z
+      .string()
+      .refine((value) => value === "" || isValidIsoDate(value), "Enter a valid due date"),
+    description: z.string().trim(),
+    previousPayments: z
+      .string()
+      .trim()
+      .refine((v) => v === "" || money.test(v), "Enter an amount like 1180.50"),
+    currentDue: z
+      .string()
+      .trim()
+      .refine(
+        (value) => value === "" || (money.test(value) && Number(value) > 0),
+        "Enter an amount greater than 0, like 1180.50",
+      ),
+    accountStatus: z.enum(accountStatuses),
+    notes: z.string().trim(),
+    websiteName: z
+      .string()
+      .trim()
+      .refine((v) => v === "" || isWebsite(v), "Enter a full URL like https://domainname.com"),
+    // The vendor account the analyst picked; "" leaves it to the server's
+    // account number match.
+    vendorAccountId: z.string(),
+  })
+  .refine((v) => !v.issueDate || !v.dueDate || v.dueDate >= v.issueDate, {
+    message: "Due date can't be before the issue date",
+    path: ["dueDate"],
+  });
+
+export type InvoiceDraftFormValues = z.infer<typeof invoiceDraftFormSchema>;
+
+export const emptyDraftInvoiceForm: InvoiceDraftFormValues = {
+  accountNumber: "",
+  statementId: "",
+  companyName: "",
+  propertyAddress: "",
+  issueDate: "",
+  dueDate: "",
+  description: "",
+  previousPayments: "",
+  currentDue: "",
+  accountStatus: "",
+  notes: "",
+  websiteName: "",
+  vendorAccountId: "",
+};

@@ -8,3 +8,15 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# macOS
+.DS_Store
+
+# Eval run outputs (DC-52); summaries go in the PR and the spec
+backend/evals/results/
+
+# pytest JUnit reports (CI writes backend/real-login.xml)
+backend/*.xml
+
+# Supabase Studio saved queries
+backend/supabase/snippets/
