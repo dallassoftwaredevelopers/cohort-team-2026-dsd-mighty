@@ -52,8 +52,27 @@ OPERATORS: dict[str, Callable[[Any, str], bool]] = {
 
 
 class _Result:
-    def __init__(self, data: Any) -> None:
+    def __init__(self, data: Any, count: int | None = None) -> None:
         self.data = data
+        # Set only when the query asked for count="exact", as in supabase-py.
+        self.count = count
+
+
+def _like_regex(pattern: str) -> re.Pattern[str]:
+    """A Postgres LIKE pattern as a regex: `%` and PostgREST's `*` match any
+    run, `_` one character, and a backslash escapes the next character."""
+    parts = []
+    characters = iter(pattern)
+    for character in characters:
+        if character == "\\":
+            parts.append(re.escape(next(characters, "")))
+        elif character in "%*":
+            parts.append(".*")
+        elif character == "_":
+            parts.append(".")
+        else:
+            parts.append(re.escape(character))
+    return re.compile("".join(parts), re.IGNORECASE | re.DOTALL)
 
 
 def _insert_defaults(table: str) -> dict[str, Any]:
@@ -84,12 +103,15 @@ class _Query:
         self._any_of: list[list[tuple[str, str, str]]] = []
         self._embeds: list[tuple[str, str, str, list[str]]] = []
         self._columns: list[str] | None = None  # None: every column
-        self._order: tuple[str, bool] | None = None
+        self._order: list[tuple[str, bool]] = []
         self._limit: int | None = None
+        self._offset = 0
+        self._count = False
+        self._likes: list[tuple[str, re.Pattern[str]]] = []
         self._single: str | None = None  # "maybe" or "one"
         self._neq_filters: list[tuple[str, Any]] = []
 
-    def select(self, *columns: str) -> "_Query":
+    def select(self, *columns: str, count: str | None = None) -> "_Query":
         # After insert/update this names the columns of the affected rows.
         # Like PostgREST, only the named columns come back ("*" is all), so a
         # query that forgets a column fails in tests too.
@@ -98,6 +120,8 @@ class _Query:
             self._embeds.append((alias, table, fk_column, inner.split(",")))
         plain = [c.strip() for c in EMBED.sub("", joined).split(",") if c.strip()]
         self._columns = None if "*" in plain else plain
+        assert count in (None, "exact"), f"count={count!r} unsupported"
+        self._count = count == "exact"
         return self
 
     def insert(self, payload: dict[str, Any]) -> "_Query":
@@ -131,11 +155,20 @@ class _Query:
         return self
 
     def order(self, column: str, desc: bool = False) -> "_Query":
-        self._order = (column, desc)
+        self._order.append((column, desc))
         return self
 
     def limit(self, count: int) -> "_Query":
         self._limit = count
+        return self
+
+    def range(self, start: int, end: int) -> "_Query":
+        # supabase-py sends offset and limit, as here.
+        self._offset, self._limit = start, end - start + 1
+        return self
+
+    def ilike(self, column: str, pattern: str) -> "_Query":
+        self._likes.append((column, _like_regex(pattern)))
         return self
 
     def maybe_single(self) -> "_Query":
@@ -154,6 +187,11 @@ class _Query:
         return (
             all(row.get(column) == value for column, value in self._filters)
             and all(row.get(column) != value for column, value in self._neq_filters)
+            and all(
+                isinstance(row.get(column), str)
+                and pattern.fullmatch(row[column]) is not None
+                for column, pattern in self._likes
+            )
             and all(
                 any(
                     OPERATORS[op](row.get(column), value) for column, op, value in group
@@ -217,11 +255,17 @@ class _Query:
                 for row in rows:
                     self._rows.remove(row)
                     self._db.after_delete(self._table, row)
-            if self._order:
-                column, desc = self._order
+            for column, desc in reversed(self._order):
                 rows.sort(key=lambda row: row.get(column) or "", reverse=desc)
-            if self._limit is not None:
-                rows = rows[: self._limit]
+            if self._count and self._offset > len(rows):
+                # PostgREST answers 416 when a counted page starts past the end.
+                raise APIError(
+                    {"code": "PGRST103", "message": "Requested range not satisfiable"}
+                )
+        total = len(rows)
+        if self._op != "insert":
+            end = None if self._limit is None else self._offset + self._limit
+            rows = rows[self._offset : end]
 
         copies = [self._project(self._embed(dict(row))) for row in rows]
         if self._single == "maybe":
@@ -230,7 +274,7 @@ class _Query:
         if self._single == "one":
             assert len(copies) == 1, f"single() matched {len(copies)} rows"
             return _Result(copies[0])
-        return _Result(copies)
+        return _Result(copies, total if self._count else None)
 
 
 class _Bucket:
