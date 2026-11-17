@@ -2,6 +2,7 @@ from typing import Any
 from uuid import UUID
 
 from postgrest import SyncSelectRequestBuilder
+from postgrest.exceptions import APIError
 
 from backend.schemas.bill import (
     BillCreate,
@@ -14,25 +15,51 @@ from backend.services.bill_access import (
     editable_bills,
     readable_bills,
 )
+from backend.services.vendor_account_matching import match_columns
 from supabase import Client
 
 BILL_COLUMNS = (
     "bill_id,account_number_raw,vendor_name_raw,invoice_number,"
     "invoice_date,due_date,amount,prev_payments,description,"
     "processing_notes,property_address,account_status,website_name,"
-    "vendor_account_id,status,exception_reason,document_path,created_at,"
+    "vendor_account_id,vendor_id,property_id,vendor_account_picked,"
+    "status,exception_reason,document_path,created_at,"
     "submitter:app_users!submitted_by(user_id,full_name)"
 )
 
 DASHBOARD_COLUMNS = (
     "bill_id,invoice_number,property_address,"
     "vendor_name_raw,invoice_date,due_date,"
-    "amount,status,document_path,created_at"
+    "amount,status,document_path,created_at,"
+    # The matched vendor and property, null while the bill is unmatched.
+    "vendor:vendors!vendor_id(vendor_name),"
+    "property:properties!property_id(property_name)"
 )
 
 DRAFT_COLUMNS = "bill_id,status,document_path"
 
 LIST_LIMIT = 100
+
+UNIQUE_VIOLATION = "23505"
+
+# The match columns are set from the account, never from the request.
+MATCH_FIELDS = {"vendor_account_id"}
+
+
+class DuplicateInvoice(Exception):
+    """The bill's vendor account already has a bill with this invoice number
+    (index bills_account_invoice_unique)."""
+
+
+def _write(query: Any) -> Any:
+    """Run an insert or update on `bills`, raising DuplicateInvoice for the
+    one unique index a write can break."""
+    try:
+        return query.execute()
+    except APIError as error:
+        if error.code == UNIQUE_VIOLATION:
+            raise DuplicateInvoice from error
+        raise
 
 
 # ---------------------------------------------------------
@@ -107,13 +134,17 @@ def save_bill(
     payload = fields.model_dump(
         mode="json",
         exclude_none=True,
+        exclude=MATCH_FIELDS,
     )
 
     payload["submitted_by"] = str(user_id)
     payload["status"] = status.value
+    payload |= match_columns( 
+    client, fields.account_number_raw, fields.vendor_account_id
+)
 
-    response = (
-        client.table("bills").insert(payload).select(BILL_COLUMNS).single().execute()
+    response = _write(
+        client.table("bills").insert(payload).select(BILL_COLUMNS).single()
     )
 
     row = response.data
@@ -246,7 +277,14 @@ def list_dashboard_bills(
         .execute()
     )
 
-    return response.data or []
+    return [
+        {
+            **row,
+            "vendor_name": (row.pop("vendor") or {}).get("vendor_name"),
+            "property_name": (row.pop("property") or {}).get("property_name"),
+        }
+        for row in response.data or []
+    ]
 
 
 # ---------------------------------------------------------
@@ -345,22 +383,71 @@ def update_draft(
     payload = draft.model_dump(
         mode="json",
         exclude_unset=True,
+        exclude=MATCH_FIELDS,
     )
 
-    if not payload:
-        return get_editable_draft(
-            client,
-            bill_id,
-            user_id,
-        )
+    sent = draft.model_fields_set
 
-    response = (
+    if "account_number_raw" in sent:
+        payload |= match_columns(
+            client, draft.account_number_raw, draft.vendor_account_id
+        )
+    else:
+        stored = get_editable_draft(client, bill_id, user_id)
+        if stored is None:
+            return None
+
+        if "vendor_account_id" in sent or not stored["vendor_account_picked"]:
+            payload |= match_columns(
+                client,
+                stored.get("account_number_raw"),
+                draft.vendor_account_id,
+            )
+
+        if not payload:
+            return stored
+
+    response = _write(
         _editable(
             client.table("bills").update(payload).eq("bill_id", str(bill_id)),
             user_id,
+        ).select(DRAFT_COLUMNS)
+    )
+
+    rows = response.data or []
+
+    return rows[0] if len(rows) == 1 else None
+    `exclude_unset` keeps explicit nulls, so a field cleared in the form is
+    cleared in the database, while fields the client did not send are left
+    untouched. The match is worked out again when the request sends the
+    account number or the vendor account, and on every save of a draft whose
+    stored match was not picked, so an account added or changed since is
+    taken into account. A picked account stays until the request changes the
+    number or the pick.
+    """
+    payload = draft.model_dump(mode="json", exclude_unset=True, exclude=MATCH_FIELDS)
+    sent = draft.model_fields_set
+
+    if "account_number_raw" in sent:
+        payload |= match_columns(
+            client, draft.account_number_raw, draft.vendor_account_id
         )
-        .select(DRAFT_COLUMNS)
-        .execute()
+    else:
+        stored = get_editable_draft(client, bill_id, user_id)
+        if stored is None:
+            return None
+        if "vendor_account_id" in sent or not stored["vendor_account_picked"]:
+            payload |= match_columns(
+                client, stored.get("account_number_raw"), draft.vendor_account_id
+            )
+        if not payload:
+            return stored
+
+    response = _write(
+        _editable(
+            client.table("bills").update(payload).eq("bill_id", str(bill_id)),
+            user_id,
+        ).select(DRAFT_COLUMNS)
     )
 
     rows = response.data or []
