@@ -58,6 +58,8 @@ ROLE_TABLE = [
     ("PATCH", "/vendor-accounts/{account_id}", {ADMIN}, 200),
     ("GET", "/properties", {ANALYST, APPROVER, ADMIN}, 200),
     ("POST", "/properties", {ADMIN}, 201),
+    ("GET", "/properties/{property_id}", {ANALYST, APPROVER, ADMIN}, 200),
+    ("PATCH", "/properties/{property_id}", {ADMIN}, 200),
     ("GET", "/admin/users", {ADMIN}, 200),
     ("GET", "/admin/users/{user_id}", {ADMIN}, 200),
     ("PATCH", "/admin/users/{user_id}", {ADMIN}, 200),
@@ -102,6 +104,7 @@ REQUEST_BODY = {
         }
     },
     ("PATCH", "/vendors/{vendor_id}"): {"json": {"contact_phone": "555-0100"}},
+    ("PATCH", "/properties/{property_id}"): {"json": {"status": "inactive"}},
     # {placeholders} are filled with the ids of the rows the test creates.
     ("POST", "/vendor-accounts"): {
         "json": {
