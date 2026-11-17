@@ -84,26 +84,22 @@ class Network:
         )
 
     def writes(self) -> list[httpx.Request]:
-        """The requests that change data. The audit triggers fire on these."""
+        """Return all non-GET requests."""
         return [request for request in self.requests if request.method != "GET"]
 
     def actors(self) -> list[str | None]:
         """The actor header on each write, in order."""
         return [request.headers.get(ACTOR_HEADER) for request in self.writes()]
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        """Mock Supabase HTTP requests."""
         if request.method == "GET":
-            # Reads before the write, such as the vendor account lookup that
-            # matches a bill: nothing matches.
+            # Reads before the write, such as the vendor account lookup
+            # that matches a bill: nothing matches.
             return httpx.Response(200, json=[])
+
         submitted_by = json.loads(request.content)["submitted_by"]
         return httpx.Response(201, json=_bill_row(submitted_by))
-
-    def actors(self) -> list[str | None]:
-        """The actor sent with each write; the audit triggers fire on writes."""
-        return [
-            request.headers.get(ACTOR_HEADER)
-            for request in self.requests
-            if request.method != "GET"
-        ]
 
 
 @pytest.fixture
