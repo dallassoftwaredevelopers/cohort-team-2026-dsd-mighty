@@ -206,7 +206,6 @@ def _insert_defaults(table: str) -> dict[str, Any]:
             "created_at": now,
         }
 
-    raise ValueError(f"Insert defaults are not defined for table {table!r}")
     if table == "payment_runs":
         return {
             "run_id": str(uuid4()),
@@ -220,12 +219,8 @@ def _insert_defaults(table: str) -> dict[str, Any]:
             "finished_at": None,
             "updated_at": now,
         }
-    return {
-        "bill_id": str(uuid4()),
-        "document_path": None,
-        "vendor_account_picked": False,
-        "created_at": now,
-    }
+
+    raise ValueError(f"Insert defaults are not defined for table {table!r}")
 
 
 class _Query:
@@ -847,6 +842,22 @@ class FakeSupabase:
         self.tables.setdefault("approvals", []).append(row)
         return row
 
+    def add_payment_run(
+        self,
+        bill_id: str,
+        started_by: str,
+        **fields: Any,
+    ) -> dict[str, Any]:
+        """A payment run row, queued unless `fields` say otherwise."""
+        row = {
+            **_insert_defaults("payment_runs"),
+            "bill_id": bill_id,
+            "started_by": started_by,
+            **fields,
+        }
+        self.table("payment_runs")._rows.append(row)
+        return row
+
     # ------------------------------------------------------------------
     # Approval workflow RPC twins
     # ------------------------------------------------------------------
@@ -1152,8 +1163,9 @@ class FakeSupabase:
         }
 
     # ------------------------------------------------------------------
-    # Vendor-account and Vault RPC twins
-    #
+    # Payment RPC twins
+    # ------------------------------------------------------------------
+
     def _rpc_record_payment(self, **params: Any) -> dict[str, Any]:
         return _record_payment(self, params)
 
@@ -1203,6 +1215,9 @@ class FakeSupabase:
         )
         return [dict(run)]
 
+    # ------------------------------------------------------------------
+    # Vendor-account and Vault RPC twins
+    #
     # Python twins of the SQL functions in
     # 20261115100000_vendor_portal_login.sql. Keep them in step: same checks,
     # same order, same error codes.
@@ -1360,99 +1375,3 @@ class FakeSupabase:
                 "portal_password": self.vault.get(secret_id) if secret_id else None,
             }
         ]
-
-    def find(self, table: str, column: str, value: Any) -> dict[str, Any] | None:
-        rows = self.tables.get(table, [])
-        return next((row for row in rows if row.get(column) == value), None)
-
-    def add_bill(self, submitted_by: str, **fields: Any) -> dict[str, Any]:
-        """A bill row; its submitter's `app_users` row is added if missing, as
-        the foreign key needs it."""
-        if not self.find("app_users", "user_id", submitted_by):
-            self.add_user(submitted_by)
-        row = {
-            "bill_id": str(uuid4()),
-            "submitted_by": submitted_by,
-            "status": "draft",
-            "document_path": None,
-            "vendor_account_picked": False,
-            "created_at": datetime.now(UTC).isoformat(),
-            **fields,
-        }
-        self.tables.setdefault("bills", []).append(row)
-        return row
-
-    def add_vendor(self, vendor_name: str, **fields: Any) -> dict[str, Any]:
-        row = {
-            "vendor_id": str(uuid4()),
-            "vendor_name": vendor_name,
-            "contact_email": None,
-            "contact_phone": None,
-            "default_payment_method": None,
-            "created_at": datetime.now(UTC).isoformat(),
-            **fields,
-        }
-        self.table("vendors")._rows.append(row)
-        return row
-
-    def add_property(self, property_name: str = "Elm Court", **fields: Any) -> dict:
-        row = {
-            "property_id": str(uuid4()),
-            "property_name": property_name,
-            "street": "1 Main St",
-            "city": "Dallas",
-            "state": "TX",
-            "zip_code": "75201",
-            "status": "active",
-            "created_at": datetime.now(UTC).isoformat(),
-            **fields,
-        }
-        self.table("properties")._rows.append(row)
-        return row
-
-    def add_vendor_account(
-        self, property_id: str, vendor_id: str, **fields: Any
-    ) -> dict[str, Any]:
-        """An account row; set its password through the `update_vendor_account`
-        rpc, as the repository does."""
-        row = {
-            **_insert_defaults("vendor_accounts"),
-            "property_id": property_id,
-            "vendor_id": vendor_id,
-            "account_number": "ACC-1",
-            "account_type": "water",
-            "payment_method": "ach",
-            **fields,
-        }
-        self.table("vendor_accounts")._rows.append(row)
-        return row
-
-    def add_payment_run(
-        self, bill_id: str, started_by: str, **fields: Any
-    ) -> dict[str, Any]:
-        """A payment run row, queued unless `fields` say otherwise."""
-        row = {
-            **_insert_defaults("payment_runs"),
-            "bill_id": bill_id,
-            "started_by": started_by,
-            **fields,
-        }
-        self.table("payment_runs")._rows.append(row)
-        return row
-
-    def add_user(
-        self,
-        user_id: str,
-        **fields: Any,
-    ) -> dict[str, Any]:
-        row = {
-            "user_id": user_id,
-            "full_name": "Test User",
-            "email": "test@example.com",
-            "role": "analyst",
-            "status": "active",
-            "created_at": datetime.now(UTC).isoformat(),
-            **fields,
-        }
-        self.table("app_users")._rows.append(row)
-        return row

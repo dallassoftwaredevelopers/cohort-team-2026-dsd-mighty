@@ -222,42 +222,6 @@ def test_route_allows_only_its_active_roles(
         status=status,
     )
 
-    document_path = (
-        "bills/test/invoice.pdf"
-        if method == "GET" and path == "/bills/{bill_id}/document"
-        else None
-    )
-
-    # Seed the bill in the state required by the route being tested.
-    if path == "/bills/{bill_id}/resubmit":
-        bill_status = "rejected"
-    elif path in {
-        "/approvals",
-        "/approvals/{approval_id}/decision",
-    }:
-        bill_status = "pending_approval"
-    else:
-        bill_status = "draft"
-
-    bill = db.add_bill(
-        str(user.id),
-        status=bill_status,
-        document_path=document_path,
-    )
-
-    approval = None
-
-    if path != "/bills/{bill_id}/submit":
-        approval = db.add_approval(bill["bill_id"])
-
-    # Resubmission must start with a rejected approval record.
-    if path == "/bills/{bill_id}/resubmit":
-        approval["approval_status"] = "rejected"
-
-    vendor = db.add_vendor("Acme Water")
-    prop = db.add_property()
-    account = db.add_vendor_account(prop["property_id"], vendor["vendor_id"])
-
     vendor = db.add_vendor("Acme Water")
     prop = db.add_property()
     # With a portal login, so the account can be paid by a payment run.
@@ -276,22 +240,61 @@ def test_route_allows_only_its_active_roles(
             "p_password": "hunter2-portal",
         },
     ).execute()
+
     ids = {
         "vendor_id": vendor["vendor_id"],
         "property_id": prop["property_id"],
         "account_id": account["account_id"],
     }
+
+    # The document route needs a stored PDF to sign a URL for.
+    document_path = (
+        "bills/test/invoice.pdf"
+        if method == "GET" and path == "/bills/{bill_id}/document"
+        else None
+    )
+
+    # Seed the bill in the state the route under test requires.
+    if path == "/bills/{bill_id}/resubmit":
+        bill_status = "rejected"
+    elif path in {
+        "/approvals",
+        "/approvals/{approval_id}/decision",
+    }:
+        bill_status = "pending_approval"
+    else:
+        bill_status = "draft"
+
     bill_fields = {
         key: value.format(**ids) if isinstance(value, str) else value
         for key, value in BILL_FIELDS.get((method, path), {}).items()
     }
-    bill = db.add_bill(str(user.id), **bill_fields)
+
+    # One bill only: state first, then any per-route overrides.
+    bill = db.add_bill(
+        str(user.id),
+        **{
+            "status": bill_status,
+            "document_path": document_path,
+            **bill_fields,
+        },
+    )
     ids["bill_id"] = bill["bill_id"]
-    if "{run_id}" in path:
-        ids["run_id"] = db.add_payment_run(bill["bill_id"], str(user.id))["run_id"]
+
+    approval = None
+
+    if path != "/bills/{bill_id}/submit":
+        approval = db.add_approval(bill["bill_id"])
+
+    # Resubmission must start with a rejected approval record.
+    if path == "/bills/{bill_id}/resubmit":
+        approval["approval_status"] = "rejected"
 
     if approval is not None:
         ids["approval_id"] = approval["approval_id"]
+
+    if "{run_id}" in path:
+        ids["run_id"] = db.add_payment_run(bill["bill_id"], str(user.id))["run_id"]
 
     target_user = db.add_user(
         "00000000-0000-0000-0000-000000000001",
