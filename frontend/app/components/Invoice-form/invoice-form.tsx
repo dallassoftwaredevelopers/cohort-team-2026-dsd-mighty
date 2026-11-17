@@ -752,77 +752,86 @@ function InvoiceFormVisit({
         </div>
       </div>
 
-      <section className="rounded-xl border border-border bg-surface p-6 text-center">
-        <label
-          htmlFor="invoicePdf"
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          className={`block cursor-pointer rounded-lg border-2 border-dashed p-6 transition-colors focus-within:ring-2 focus-within:ring-ring ${
-            isDragging ? "border-blue-600 bg-blue-50" : "border-border hover:bg-surface-muted"
-          }`}
+      {isResubmission ? (
+        <section
+          aria-label="Invoice PDF"
+          className="rounded-xl border border-border bg-surface p-6 text-center"
         >
-          <FileUp className="mx-auto h-6 w-6 text-foreground-muted" />
-
-          <span className="mt-2 block text-sm font-medium">
-            {isDragging ? "Drop the PDF here" : "Upload / import invoice (PDF)"}
-          </span>
-
-          <span className="mt-1 block text-sm text-foreground-muted">
-            {selectedFile ? selectedFile.name : "Drag and drop a PDF here, or click to browse"}
-          </span>
-
-          <input
-            ref={fileInputRef}
-            id="invoicePdf"
-            type="file"
-            accept=".pdf,application/pdf"
-            className="sr-only"
-            onChange={(event) => {
-              selectFile(event.target.files?.[0] ?? null);
-              // The picked file lives in state. Clearing the input lets the
-              // same file be picked again (to retry a read), which browsers
-              // otherwise ignore.
-              event.target.value = "";
-            }}
-          />
-        </label>
-
-        {reader.phase === "reading" && (
-          <p
-            role="status"
-            className="mt-3 flex items-center justify-center gap-2 text-sm text-foreground-muted"
+          <div className="flex items-center justify-center gap-2 text-sm text-foreground-muted">
+            <FileCheck aria-hidden="true" className="h-5 w-5 shrink-0" />
+            <p>The existing invoice PDF will be retained when you resubmit this bill.</p>
+          </div>
+        </section>
+      ) : (
+        <section className="rounded-xl border border-border bg-surface p-6 text-center">
+          <label
+            htmlFor="invoicePdf"
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`block cursor-pointer rounded-lg border-2 border-dashed p-6 transition-colors focus-within:ring-2 focus-within:ring-ring ${
+              isDragging ? "border-blue-600 bg-blue-50" : "border-border hover:bg-surface-muted"
+            }`}
           >
-            <LoaderCircle
-              aria-hidden="true"
-              className="h-4 w-4 animate-spin motion-reduce:animate-none"
+            <FileUp className="mx-auto h-6 w-6 text-foreground-muted" />
+
+            <span className="mt-2 block text-sm font-medium">
+              {isDragging ? "Drop the PDF here" : "Upload / import invoice (PDF)"}
+            </span>
+
+            <span className="mt-1 block text-sm text-foreground-muted">
+              {selectedFile ? selectedFile.name : "Drag and drop a PDF here, or click to browse"}
+            </span>
+
+            <input
+              ref={fileInputRef}
+              id="invoicePdf"
+              type="file"
+              accept=".pdf,application/pdf"
+              className="sr-only"
+              onChange={(event) => {
+                selectFile(event.target.files?.[0] ?? null);
+                event.target.value = "";
+              }}
             />
-            {READING_MESSAGE}
-          </p>
-        )}
+          </label>
 
-        {reader.phase === "done" && <ExtractionNotice banner={reader.banner} />}
+          {reader.phase === "reading" && (
+            <p
+              role="status"
+              className="mt-3 flex items-center justify-center gap-2 text-sm text-foreground-muted"
+            >
+              <LoaderCircle
+                aria-hidden="true"
+                className="h-4 w-4 animate-spin motion-reduce:animate-none"
+              />
+              {READING_MESSAGE}
+            </p>
+          )}
 
-        {storageNote?.tone === "stored" && (
-          <p
-            role="status"
-            className="mt-3 flex items-center justify-center gap-2 text-sm text-paid"
-          >
-            <FileCheck aria-hidden="true" className="h-4 w-4 shrink-0" />
-            {storageNote.message}
-          </p>
-        )}
+          {reader.phase === "done" && <ExtractionNotice banner={reader.banner} />}
 
-        {storageNote?.tone === "pending" && (
-          <p className="mt-3 text-sm text-foreground-muted">{storageNote.message}</p>
-        )}
+          {storageNote?.tone === "stored" && (
+            <p
+              role="status"
+              className="mt-3 flex items-center justify-center gap-2 text-sm text-paid"
+            >
+              <FileCheck aria-hidden="true" className="h-4 w-4 shrink-0" />
+              {storageNote.message}
+            </p>
+          )}
 
-        {fileError && (
-          <p role="alert" className="mt-3 text-sm text-red-600">
-            {fileError}
-          </p>
-        )}
-      </section>
+          {storageNote?.tone === "pending" && (
+            <p className="mt-3 text-sm text-foreground-muted">{storageNote.message}</p>
+          )}
+
+          {fileError && (
+            <p role="alert" className="mt-3 text-sm text-red-600">
+              {fileError}
+            </p>
+          )}
+        </section>
+      )}
 
       <fieldset className="space-y-4 rounded-xl border border-border bg-surface p-6 shadow-sm">
         <legend className="px-2 text-sm font-semibold text-foreground">General bill info</legend>
