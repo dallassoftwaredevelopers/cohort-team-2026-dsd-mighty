@@ -38,6 +38,9 @@ function bill(overrides: Partial<Bill> = {}): Bill {
     id: "bill-123",
     account_number_raw: "ACC-1001",
     vendor_name_raw: "Acme Utilities",
+    vendor_account_picked: false,
+    vendor_id: null,
+    property_id: null,
     invoice_number: "INV-1001",
     invoice_date: "2026-11-01",
     due_date: "2026-11-30",
@@ -147,6 +150,7 @@ describe("InvoiceDetailPage", () => {
       expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load invoice.");
     });
   });
+
   describe("Approval access", () => {
     it.each(["approver", "admin"] as const)(
       "shows the approval panel for an active %s",
@@ -261,10 +265,8 @@ describe("InvoiceDetailPage", () => {
 
       render(<InvoiceDetailPage />);
 
-      // Wait until the invoice has loaded.
       await screen.findByRole("heading", { name: "INV-1001" });
 
-      // Verify the approval API was called.
       await waitFor(() => {
         expect(mockGetApprovals).toHaveBeenCalledWith({
           status: "pending",
@@ -273,7 +275,6 @@ describe("InvoiceDetailPage", () => {
         });
       });
 
-      // The unresolved Promise should keep the loading state visible.
       expect(await screen.findByText("Loading approval details...")).toBeInTheDocument();
     });
 

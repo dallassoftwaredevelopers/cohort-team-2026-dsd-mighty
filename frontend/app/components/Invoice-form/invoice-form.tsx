@@ -45,8 +45,6 @@ type UnansweredSubmit = {
   pdf: File | null;
 };
 
-// The submit route's 409 for a bill that is no longer a draft. Its other 409,
-// an invoice number the vendor account already has, means nothing was sent.
 const ALREADY_SUBMITTED_DETAIL = "This bill has already been submitted.";
 
 const ALREADY_SUBMITTED_MESSAGE =
@@ -139,9 +137,6 @@ function mapDraftToFormValues(draft: BillDraftDetail): InvoiceFormValues {
     propertyAddress: draft.property_address ?? "",
     accountStatus: draft.account_status ?? "",
     websiteName: draft.website_name ?? "",
-    // Only the analyst's own pick comes back as one. An account the number
-    // found is left to the server, which matches the number again on save,
-    // so an account added or changed since is taken into account.
     vendorAccountId: draft.vendor_account_picked ? (draft.vendor_account_id ?? "") : "",
   };
 }
@@ -160,6 +155,7 @@ function mapBillToFormValues(bill: Bill): InvoiceFormValues {
     propertyAddress: bill.property_address ?? "",
     accountStatus: bill.account_status ?? "",
     websiteName: bill.website_name ?? "",
+    vendorAccountId: bill.vendor_account_picked ? (bill.vendor_account_id ?? "") : "",
   };
 }
 
@@ -210,8 +206,6 @@ function draftIdFromPath(pathname: string): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-// Tracks visits using pathname changes instead of relying on an
-// undocumented bfcacheId property from useRouter().
 export function InvoiceForm({ isResubmission = false }: InvoiceFormProps) {
   const pathname = usePathname();
   const [visit, setVisit] = useState(0);
@@ -302,13 +296,11 @@ function InvoiceFormVisit({
 
   const watchedValues = useWatch({ control });
 
-  // "" leaves the bill to the server's account number match.
   const pickVendorAccount = useCallback(
     (vendorAccountId: string) => setValue("vendorAccountId", vendorAccountId),
     [setValue],
   );
-  // A vendor account picked for one account number is wrong for another:
-  // the new number is matched instead.
+
   const clearVendorAccountPick = () => pickVendorAccount("");
 
   const hasAnyInput =
@@ -405,11 +397,6 @@ function InvoiceFormVisit({
     try {
       await submitBill(id, payload);
     } catch (error) {
-      // 409 means this draft was already submitted. That is this same Create
-      // landing only when an earlier attempt got no answer and every such
-      // attempt sent exactly these values and this PDF. Otherwise (values
-      // edited before the retry, or another tab submitted it) the bill went
-      // with other values, so say so instead of reporting success.
       const alreadySubmitted =
         error instanceof ApiError &&
         error.status === 409 &&
