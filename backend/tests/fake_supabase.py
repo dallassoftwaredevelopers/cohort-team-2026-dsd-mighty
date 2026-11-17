@@ -10,10 +10,11 @@ through FOREIGN_KEYS. Inserts and updates must satisfy FOREIGN_KEYS and
 UNIQUE_KEYS; a violation raises the APIError PostgREST sends, with the
 Postgres error code, so the repositories' error handling runs in tests.
 
-rpc() runs Python twins of the SQL functions the repositories call, with
-Vault as a dict of plaintext secrets. Each call is one transaction, as through
-PostgREST: if the twin raises, every table row and Vault secret it changed is
-put back.
+`rpc()` runs Python twins of the Postgres functions, the `FakeSupabase._rpc_*`
+methods (`_record_payment` for record_payment), with Vault as a dict of
+plaintext secrets; each mirrors its migration, including the SQLSTATE and
+DETAIL of every refusal. Each call is one transaction, as through PostgREST:
+if the twin raises, every table row and Vault secret it changed is put back.
 
 Supports only the query shapes the repositories use. Helpers, not tests.
 """
@@ -21,7 +22,8 @@ Supports only the query shapes the repositories use. Helpers, not tests.
 import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
@@ -38,6 +40,8 @@ FOREIGN_KEYS = {
     ("approvals", "reviewer_id"): ("app_users", "user_id"),
     ("vendor_accounts", "property_id"): ("properties", "property_id"),
     ("vendor_accounts", "vendor_id"): ("vendors", "vendor_id"),
+    ("payment_runs", "bill_id"): ("bills", "bill_id"),
+    ("payment_runs", "started_by"): ("app_users", "user_id"),
 }
 
 
@@ -68,6 +72,51 @@ UNIQUE_KEYS: dict[str, list[Callable[[dict[str, Any]], tuple | None]]] = {
     "bills": [_bill_invoice_key],
 }
 
+# table -> (columns, row predicate): unique among the rows the predicate
+# holds for, like a partial unique index.
+PARTIAL_UNIQUE_KEYS: dict[str, list[tuple[tuple[str, ...], Callable[..., bool]]]] = {
+    # payment_runs_one_active_per_bill
+    "payment_runs": [
+        (("bill_id",), lambda row: row.get("status") in ("queued", "running"))
+    ],
+}
+
+FINAL_RUN_STATUSES = ("paid", "flagged", "failed")
+
+# table -> (constraint name, predicate every row must satisfy), as in the
+# migrations' check constraints.
+CHECKS: dict[str, list[tuple[str, Callable[[dict[str, Any]], bool]]]] = {
+    "payment_runs": [
+        (
+            "payment_runs_status_check",
+            lambda r: r["status"] in ("queued", "running", *FINAL_RUN_STATUSES),
+        ),
+        (
+            "payment_runs_steps_check",
+            lambda r: isinstance(r["steps"], list),
+        ),
+        (
+            "payment_runs_flag_reason_only_when_flagged",
+            lambda r: (r["status"] == "flagged") == (r["flag_reason"] is not None),
+        ),
+        (
+            "payment_runs_started_unless_queued",
+            lambda r: (r["status"] == "queued") == (r["started_at"] is None),
+        ),
+        (
+            "payment_runs_finished_when_done",
+            lambda r: (
+                (r["status"] in FINAL_RUN_STATUSES) == (r["finished_at"] is not None)
+            ),
+        ),
+        (
+            "payment_runs_payment_when_recorded",
+            lambda r: (
+                r["status"] not in ("paid", "failed") or r["payment_id"] is not None
+            ),
+        ),
+    ],
+}
 
 # alias:table!fk_column(col,col)
 EMBED = re.compile(r"(\w+):(\w+)!(\w+)\(([\w,]+)\)")
@@ -158,6 +207,25 @@ def _insert_defaults(table: str) -> dict[str, Any]:
         }
 
     raise ValueError(f"Insert defaults are not defined for table {table!r}")
+    if table == "payment_runs":
+        return {
+            "run_id": str(uuid4()),
+            "status": "queued",
+            "steps": [],
+            "flag_reason": None,
+            "receipt": None,
+            "payment_id": None,
+            "created_at": now,
+            "started_at": None,
+            "finished_at": None,
+            "updated_at": now,
+        }
+    return {
+        "bill_id": str(uuid4()),
+        "document_path": None,
+        "vendor_account_picked": False,
+        "created_at": now,
+    }
 
 
 class _Query:
@@ -322,7 +390,21 @@ class _Query:
                             "message": f"{table}.{column} violates foreign key",
                         }
                     )
-
+        for name, holds in CHECKS.get(self._table, []):
+            if not holds(row):
+                raise APIError({"code": "23514", "message": f"violates {name}"})
+        for columns, applies in PARTIAL_UNIQUE_KEYS.get(self._table, []):
+            key = tuple(row.get(column) for column in columns)
+            if applies(row) and any(
+                applies(other) and tuple(other.get(c) for c in columns) == key
+                for other in others
+            ):
+                raise APIError(
+                    {
+                        "code": "23505",
+                        "message": f"duplicate key on {self._table} {columns}",
+                    }
+                )
         for unique_key in UNIQUE_KEYS.get(self._table, []):
             key = unique_key(row)
 
@@ -398,6 +480,73 @@ class _Query:
         )
 
 
+def _refuse(code: str, message: str, details: str | None = None) -> APIError:
+    return APIError({"code": code, "message": message, "details": details})
+
+
+def _decimal_or_none(value: Any) -> Decimal | None:
+    return None if value is None else Decimal(str(value))
+
+
+def _record_payment(db: "FakeSupabase", params: dict[str, Any]) -> dict[str, Any]:
+    """Migration 20261117100000_record_payment, without the row lock: the fake
+    runs one call at a time, which is what the lock gives Postgres."""
+    bill_id = params["p_bill_id"]
+    payment_status = params["p_payment_status"]
+    if payment_status not in ("completed", "failed"):
+        raise _refuse("22023", f"payment_status {payment_status!r} not allowed")
+
+    bill = db.find("bills", "bill_id", bill_id)
+    if bill is None:
+        raise _refuse("PT404", f"Bill {bill_id} not found")
+
+    # `is distinct from`: None never equals a value but does equal None, and
+    # a null DETAIL comes back empty.
+    bill_status = bill["status"]
+    if bill_status != "approved":
+        detail = "" if bill_status is None else bill_status
+        raise _refuse("PT409", f"Bill {bill_id} is not approved", detail)
+
+    bill_amount = _decimal_or_none(bill["amount"])
+    amount = _decimal_or_none(params["p_amount"])
+    if payment_status == "completed" and amount != bill_amount:
+        detail = "" if bill_amount is None else f"{bill_amount:.2f}"
+        raise _refuse("PT422", "Amount does not match", detail)
+
+    # payments_failure_reason_only_when_failed
+    if (payment_status == "failed") != (params["p_failure_reason"] is not None):
+        raise _refuse("23514", "payments_failure_reason_only_when_failed")
+
+    # payments.recorded_by references app_users
+    if db.find("app_users", "user_id", params["p_recorded_by"]) is None:
+        raise _refuse("23503", "payments_recorded_by_fkey")
+
+    payments = db.tables.setdefault("payments", [])
+    attempts = [p["attempt_number"] for p in payments if p["bill_id"] == bill_id]
+    now = datetime.now(UTC).isoformat()
+    row = {
+        "payment_id": str(uuid4()),
+        "bill_id": bill_id,
+        "payment_method": params["p_payment_method"],
+        "amount": params["p_amount"],
+        "paid_on": params["p_paid_on"],
+        "attempt_number": max(attempts, default=0) + 1,
+        "payment_status": payment_status,
+        "gateway_status": None,
+        "provider_reference": params["p_provider_reference"],
+        "failure_reason": params["p_failure_reason"],
+        "recorded_by": params["p_recorded_by"],
+        "created_at": now,
+        "updated_at": now,
+    }
+    payments.append(row)
+
+    if payment_status == "completed":
+        bill["status"] = "paid"
+
+    return dict(row)
+
+
 class _Bucket:
     def __init__(self, storage: "_Storage") -> None:
         self._storage = storage
@@ -456,6 +605,7 @@ class _Rpc:
         self._params = params
 
     def execute(self) -> _Result:
+        self._db.rpc_calls.append(self._name)
         function = getattr(self._db, f"_rpc_{self._name}")
 
         with self._db.transaction():
@@ -518,6 +668,8 @@ class FakeSupabase:
         self.vault: dict[str, str] = {}
         # Vault writes raise, as when Vault is unavailable mid-transaction.
         self.fail_vault_writes = False
+        # Names of the functions called through rpc(), in order.
+        self.rpc_calls: list[str] = []
 
     def table(self, name: str) -> _Query:
         return _Query(self, name)
@@ -1002,6 +1154,55 @@ class FakeSupabase:
     # ------------------------------------------------------------------
     # Vendor-account and Vault RPC twins
     #
+    def _rpc_record_payment(self, **params: Any) -> dict[str, Any]:
+        return _record_payment(self, params)
+
+    def _rpc_claim_next_payment_run(self) -> list[dict[str, Any]]:
+        """Migration 20261117110000_payment_runs, without the row locks: the
+        fake runs one call at a time."""
+        now = datetime.now(UTC)
+        runs = self.tables.setdefault("payment_runs", [])
+        for run in runs:
+            started = run["started_at"]
+            if run["status"] == "running" and datetime.fromisoformat(
+                started
+            ) < now - timedelta(minutes=15):
+                run.update(
+                    status="flagged",
+                    flag_reason="The worker stopped before this run finished. "
+                    "Check the vendor portal before paying this bill again.",
+                    finished_at=now.isoformat(),
+                    steps=[
+                        *run["steps"],
+                        {
+                            "at": now.isoformat(),
+                            "step": "flagged",
+                            "detail": "Run was still running after 15 minutes; "
+                            "the worker probably stopped.",
+                        },
+                    ],
+                )
+        queued = sorted(
+            (run for run in runs if run["status"] == "queued"),
+            key=lambda run: (run["created_at"], run["run_id"]),
+        )
+        if not queued:
+            return []
+        run = queued[0]
+        run.update(
+            status="running",
+            started_at=now.isoformat(),
+            steps=[
+                *run["steps"],
+                {
+                    "at": now.isoformat(),
+                    "step": "claimed",
+                    "detail": "A payment worker picked up this run.",
+                },
+            ],
+        )
+        return [dict(run)]
+
     # Python twins of the SQL functions in
     # 20261115100000_vendor_portal_login.sql. Keep them in step: same checks,
     # same order, same error codes.
@@ -1159,3 +1360,99 @@ class FakeSupabase:
                 "portal_password": self.vault.get(secret_id) if secret_id else None,
             }
         ]
+
+    def find(self, table: str, column: str, value: Any) -> dict[str, Any] | None:
+        rows = self.tables.get(table, [])
+        return next((row for row in rows if row.get(column) == value), None)
+
+    def add_bill(self, submitted_by: str, **fields: Any) -> dict[str, Any]:
+        """A bill row; its submitter's `app_users` row is added if missing, as
+        the foreign key needs it."""
+        if not self.find("app_users", "user_id", submitted_by):
+            self.add_user(submitted_by)
+        row = {
+            "bill_id": str(uuid4()),
+            "submitted_by": submitted_by,
+            "status": "draft",
+            "document_path": None,
+            "vendor_account_picked": False,
+            "created_at": datetime.now(UTC).isoformat(),
+            **fields,
+        }
+        self.tables.setdefault("bills", []).append(row)
+        return row
+
+    def add_vendor(self, vendor_name: str, **fields: Any) -> dict[str, Any]:
+        row = {
+            "vendor_id": str(uuid4()),
+            "vendor_name": vendor_name,
+            "contact_email": None,
+            "contact_phone": None,
+            "default_payment_method": None,
+            "created_at": datetime.now(UTC).isoformat(),
+            **fields,
+        }
+        self.table("vendors")._rows.append(row)
+        return row
+
+    def add_property(self, property_name: str = "Elm Court", **fields: Any) -> dict:
+        row = {
+            "property_id": str(uuid4()),
+            "property_name": property_name,
+            "street": "1 Main St",
+            "city": "Dallas",
+            "state": "TX",
+            "zip_code": "75201",
+            "status": "active",
+            "created_at": datetime.now(UTC).isoformat(),
+            **fields,
+        }
+        self.table("properties")._rows.append(row)
+        return row
+
+    def add_vendor_account(
+        self, property_id: str, vendor_id: str, **fields: Any
+    ) -> dict[str, Any]:
+        """An account row; set its password through the `update_vendor_account`
+        rpc, as the repository does."""
+        row = {
+            **_insert_defaults("vendor_accounts"),
+            "property_id": property_id,
+            "vendor_id": vendor_id,
+            "account_number": "ACC-1",
+            "account_type": "water",
+            "payment_method": "ach",
+            **fields,
+        }
+        self.table("vendor_accounts")._rows.append(row)
+        return row
+
+    def add_payment_run(
+        self, bill_id: str, started_by: str, **fields: Any
+    ) -> dict[str, Any]:
+        """A payment run row, queued unless `fields` say otherwise."""
+        row = {
+            **_insert_defaults("payment_runs"),
+            "bill_id": bill_id,
+            "started_by": started_by,
+            **fields,
+        }
+        self.table("payment_runs")._rows.append(row)
+        return row
+
+    def add_user(
+        self,
+        user_id: str,
+        **fields: Any,
+    ) -> dict[str, Any]:
+        row = {
+            "user_id": user_id,
+            "full_name": "Test User",
+            "email": "test@example.com",
+            "role": "analyst",
+            "status": "active",
+            "created_at": datetime.now(UTC).isoformat(),
+            **fields,
+        }
+        self.table("app_users")._rows.append(row)
+        return row

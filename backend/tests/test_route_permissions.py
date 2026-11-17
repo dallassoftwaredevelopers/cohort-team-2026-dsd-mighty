@@ -1,4 +1,5 @@
-"""Every bill, vendor, vendor account and property route enforces the role table.
+"""Every bill, payment, payment run, vendor, vendor account and property route
+enforces the role table.
 
 Who may call each route, active users only.
 
@@ -50,6 +51,11 @@ ROLE_TABLE = [
     ("POST", "/bills/extract", {ANALYST, ADMIN}, 200),
     ("POST", "/bills/{bill_id}/resubmit", {ANALYST, ADMIN}, 200),
     # Vendors
+    ("POST", "/bills/{bill_id}/payments", {APPROVER, ADMIN}, 201),
+    ("GET", "/bills/{bill_id}/payments", {ANALYST, APPROVER, ADMIN}, 200),
+    ("POST", "/bills/{bill_id}/payment-runs", {APPROVER, ADMIN}, 201),
+    ("GET", "/bills/{bill_id}/payment-runs", {ANALYST, APPROVER, ADMIN}, 200),
+    ("GET", "/payment-runs/{run_id}", {ANALYST, APPROVER, ADMIN}, 200),
     ("GET", "/vendors", {ANALYST, APPROVER, ADMIN}, 200),
     ("POST", "/vendors", {ADMIN}, 201),
     ("GET", "/vendors/{vendor_id}", {ANALYST, APPROVER, ADMIN}, 200),
@@ -93,6 +99,14 @@ REQUEST_BODY = {
     ("PATCH", "/bills/{bill_id}/draft"): {"json": {"amount": "10.00"}},
     ("POST", "/bills/{bill_id}/document"): {"files": {"file": PDF}},
     ("POST", "/bills/extract"): {"files": {"file": PDF}},
+    ("POST", "/bills/{bill_id}/payments"): {
+        "json": {
+            "amount": "10.00",
+            "payment_method": "ach",
+            "paid_on": "2026-11-01",
+            "outcome": "completed",
+        }
+    },
     ("POST", "/vendors"): {"json": {"name": "Acme Water"}},
     ("PATCH", "/vendors/{vendor_id}"): {"json": {"contact_phone": "555-0100"}},
     ("POST", "/vendor-accounts"): {
@@ -125,6 +139,16 @@ REQUEST_BODY = {
     ("PATCH", "/admin/users/{user_id}"): {"json": {"role": "approver"}},
 }
 
+# The caller's bill is a draft unless the route needs another state.
+# {placeholders} are filled with the ids of the rows the test creates.
+BILL_FIELDS = {
+    ("POST", "/bills/{bill_id}/payments"): {"status": "approved", "amount": "10.00"},
+    ("POST", "/bills/{bill_id}/payment-runs"): {
+        "status": "approved",
+        "amount": "10.00",
+        "vendor_account_id": "{account_id}",
+    },
+}
 
 CASES = [
     pytest.param(
@@ -158,6 +182,8 @@ def db():
         patch("backend.api.properties.get_admin_supabase", return_value=fake),
         patch("backend.api.users.get_admin_supabase", return_value=fake),
         patch("backend.api.approvals.get_admin_supabase", return_value=fake),
+        patch("backend.api.payments.get_admin_supabase", return_value=fake),
+        patch("backend.api.payment_runs.get_admin_supabase", return_value=fake),
     ):
         yield fake
 
@@ -232,12 +258,37 @@ def test_route_allows_only_its_active_roles(
     prop = db.add_property()
     account = db.add_vendor_account(prop["property_id"], vendor["vendor_id"])
 
+    vendor = db.add_vendor("Acme Water")
+    prop = db.add_property()
+    # With a portal login, so the account can be paid by a payment run.
+    account = db.add_vendor_account(
+        prop["property_id"],
+        vendor["vendor_id"],
+        portal_url="https://acme-water.example.com",
+        portal_login_email="ap@example.com",
+    )
+    db.rpc(
+        "update_vendor_account",
+        {
+            "p_account_id": account["account_id"],
+            "p_changes": {},
+            "p_password_action": "set",
+            "p_password": "hunter2-portal",
+        },
+    ).execute()
     ids = {
-        "bill_id": bill["bill_id"],
         "vendor_id": vendor["vendor_id"],
         "property_id": prop["property_id"],
         "account_id": account["account_id"],
     }
+    bill_fields = {
+        key: value.format(**ids) if isinstance(value, str) else value
+        for key, value in BILL_FIELDS.get((method, path), {}).items()
+    }
+    bill = db.add_bill(str(user.id), **bill_fields)
+    ids["bill_id"] = bill["bill_id"]
+    if "{run_id}" in path:
+        ids["run_id"] = db.add_payment_run(bill["bill_id"], str(user.id))["run_id"]
 
     if approval is not None:
         ids["approval_id"] = approval["approval_id"]
