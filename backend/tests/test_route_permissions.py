@@ -46,6 +46,7 @@ ROLE_TABLE = [
     ("GET", "/vendors/{vendor_id}", {ANALYST, APPROVER, ADMIN}, 200),
     ("PATCH", "/vendors/{vendor_id}", {ADMIN}, 200),
     ("GET", "/vendors/{vendor_id}/accounts", {ANALYST, APPROVER, ADMIN}, 200),
+    ("GET", "/vendor-accounts", {ANALYST, APPROVER, ADMIN}, 200),
     ("POST", "/vendor-accounts", {ADMIN}, 201),
     ("GET", "/vendor-accounts/{account_id}", {ANALYST, APPROVER, ADMIN}, 200),
     ("PATCH", "/vendor-accounts/{account_id}", {ADMIN}, 200),
