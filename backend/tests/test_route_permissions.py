@@ -51,6 +51,7 @@ ROLE_TABLE = [
     ("GET", "/vendor-accounts/{account_id}", {ANALYST, APPROVER, ADMIN}, 200),
     ("PATCH", "/vendor-accounts/{account_id}", {ADMIN}, 200),
     ("GET", "/properties", {ANALYST, APPROVER, ADMIN}, 200),
+    ("POST", "/properties", {ADMIN}, 201),
     ("GET", "/admin/users", {ADMIN}, 200),
     ("GET", "/admin/users/{user_id}", {ADMIN}, 200),
     ("PATCH", "/admin/users/{user_id}", {ADMIN}, 200),
@@ -75,6 +76,17 @@ REQUEST_BODY = {
     ("POST", "/bills/{bill_id}/document"): {"files": {"file": PDF}},
     ("POST", "/bills/extract"): {"files": {"file": PDF}},
     ("POST", "/vendors"): {"json": {"name": "Acme Water"}},
+    ("POST", "/properties"): {
+        "json": {
+            "property_name": "Oak Row",
+            "address": {
+                "street": "40 Oak Row",
+                "city": "Dallas",
+                "state": "TX",
+                "zip_code": "75201",
+            },
+        }
+    },
     ("PATCH", "/vendors/{vendor_id}"): {"json": {"contact_phone": "555-0100"}},
     # {placeholders} are filled with the ids of the rows the test creates.
     ("POST", "/vendor-accounts"): {

@@ -207,6 +207,7 @@ function fullDraft(overrides: Partial<BillDraftDetail> = {}): BillDraftDetail {
     website_name: null,
     vendor_account_id: null,
     vendor_account_picked: false,
+    property_address_mismatch: false,
     document_path: null,
     ...overrides,
   };
@@ -916,6 +917,7 @@ describe("InvoiceForm", () => {
         website_name: "electric.example.com",
         vendor_account_id: null,
         vendor_account_picked: false,
+        property_address_mismatch: false,
         document_path: null,
       });
 
@@ -986,6 +988,7 @@ describe("InvoiceForm", () => {
         website_name: null,
         vendor_account_id: null,
         vendor_account_picked: false,
+        property_address_mismatch: false,
         document_path: null,
       });
 
@@ -1013,6 +1016,7 @@ describe("InvoiceForm", () => {
       website_name: null,
       vendor_account_id: null,
       vendor_account_picked: false,
+      property_address_mismatch: false,
       document_path: null,
     };
 
@@ -1665,6 +1669,7 @@ describe("InvoiceForm", () => {
         website_name: null,
         vendor_account_id: null,
         vendor_account_picked: false,
+        property_address_mismatch: false,
         document_path: null,
       });
       mockExtractBill

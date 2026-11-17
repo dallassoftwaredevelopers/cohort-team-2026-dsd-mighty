@@ -104,6 +104,8 @@ def _insert_defaults(table: str) -> dict[str, Any]:
     now = datetime.now(UTC).isoformat()
     if table == "vendors":
         return {"vendor_id": str(uuid4()), "created_at": now}
+    if table == "properties":
+        return {"property_id": str(uuid4()), "created_at": now}
     if table == "vendor_accounts":
         return {
             "account_id": str(uuid4()),
@@ -117,6 +119,7 @@ def _insert_defaults(table: str) -> dict[str, Any]:
         "bill_id": str(uuid4()),
         "document_path": None,
         "vendor_account_picked": False,
+        "property_address_mismatch": False,
         "created_at": now,
     }
 
@@ -525,6 +528,7 @@ class FakeSupabase:
             "status": "draft",
             "document_path": None,
             "vendor_account_picked": False,
+            "property_address_mismatch": False,
             "created_at": datetime.now(UTC).isoformat(),
             **fields,
         }
