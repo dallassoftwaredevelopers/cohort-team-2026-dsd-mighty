@@ -769,20 +769,11 @@ function InvoiceFormVisit({
         </div>
       </div>
 
-      {isResubmission ? (
+      {!isResubmission && (
         <section
           aria-label="Invoice PDF"
           className="rounded-xl border border-border bg-surface p-6 text-center"
         >
-          <div className="flex items-center justify-center gap-2 text-sm text-foreground-muted">
-            <FileCheck aria-hidden="true" className="h-5 w-5 shrink-0" />
-            {storedPdf.kind !== "none"
-              ? "The existing invoice PDF will be retained when you resubmit this invoice."
-              : "No invoice PDF is currently stored with this invoice."}
-          </div>
-        </section>
-      ) : (
-        <section className="rounded-xl border border-border bg-surface p-6 text-center">
           <label
             htmlFor="invoicePdf"
             onDragOver={handleDragOver}
@@ -795,11 +786,7 @@ function InvoiceFormVisit({
             <FileUp className="mx-auto h-6 w-6 text-foreground-muted" />
 
             <span className="mt-2 block text-sm font-medium">
-              {isDragging
-                ? "Drop the PDF here"
-                : isResubmission
-                  ? "Replace invoice PDF (optional)"
-                  : "Upload / import invoice (PDF)"}
+              {isDragging ? "Drop the PDF here" : "Upload / import invoice (PDF)"}
             </span>
 
             <span className="mt-1 block text-sm text-foreground-muted">
