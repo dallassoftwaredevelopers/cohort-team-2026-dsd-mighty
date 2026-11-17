@@ -108,7 +108,6 @@ function pdfStorageNote(
 
 type InvoiceFormProps = {
   isResubmission?: boolean;
-  invoiceId?: string;
 };
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -218,7 +217,7 @@ function draftIdFromPath(pathname: string): string | null {
 //   its bfcacheId. A pathname change the form did not make is therefore a new
 //   visit too. Layout effects only run while the page is shown, so the
 //   pathnames of other pages, seen while hidden, never count.
-export function InvoiceForm({ isResubmission = false, invoiceId }: InvoiceFormProps) {
+export function InvoiceForm({ isResubmission = false }: InvoiceFormProps) {
   const { bfcacheId } = useRouter();
   const pathname = usePathname();
   const [visit, setVisit] = useState(0);
@@ -247,7 +246,7 @@ export function InvoiceForm({ isResubmission = false, invoiceId }: InvoiceFormPr
   return (
     <InvoiceFormVisit
       key={`${bfcacheId}:${visit}`}
-      initialDraftId={isResubmission ? (invoiceId ?? null) : draftIdFromPath(pathname)}
+      initialDraftId={draftIdFromPath(pathname)}
       isResubmission={isResubmission}
       onDraftCreated={showDraftUrl}
     />

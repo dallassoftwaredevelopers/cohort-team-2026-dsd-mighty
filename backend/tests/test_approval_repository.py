@@ -1,9 +1,16 @@
+from unittest.mock import patch
 from uuid import UUID, uuid4
 
 import pytest
+from current_users import make_user
 from fake_supabase import FakeSupabase
+from fastapi.testclient import TestClient
+from postgrest.exceptions import APIError
 
+from backend.app import app
+from backend.auth import get_current_user
 from backend.schemas.approval import ApprovalDecisionType
+from backend.schemas.user import UserRole
 from backend.services.approval_repository import (
     decide_approval,
     get_approval,
@@ -256,13 +263,15 @@ def test_approver_cannot_approve_bill_over_5000():
     db = FakeSupabase()
     seeded = seed_approval(db, role="approver", amount=5000.01)
 
-    with pytest.raises(ValueError, match="admin must review"):
+    with pytest.raises(APIError, match="admin must review") as raised:
         decide_approval(
             client=db,
             approval_id=seeded["approval_id"],
             reviewer_id=seeded["reviewer_id"],
             decision=ApprovalDecisionType.APPROVE,
         )
+
+    assert raised.value.code == "42501"
 
 
 def test_admin_can_approve_bill_over_5000():
@@ -284,7 +293,7 @@ def test_rejection_requires_nonempty_comment(comments):
     db = FakeSupabase()
     seeded = seed_approval(db)
 
-    with pytest.raises(ValueError, match="comment is required"):
+    with pytest.raises(APIError, match="comment is required") as raised:
         decide_approval(
             client=db,
             approval_id=seeded["approval_id"],
@@ -293,18 +302,22 @@ def test_rejection_requires_nonempty_comment(comments):
             comments=comments,
         )
 
+    assert raised.value.code == "22023"
+
 
 def test_inactive_reviewer_cannot_decide_approval():
     db = FakeSupabase()
     seeded = seed_approval(db, reviewer_status="inactive")
 
-    with pytest.raises(ValueError, match="not active"):
+    with pytest.raises(APIError, match="not active") as raised:
         decide_approval(
             client=db,
             approval_id=seeded["approval_id"],
             reviewer_id=seeded["reviewer_id"],
             decision=ApprovalDecisionType.APPROVE,
         )
+
+    assert raised.value.code == "42501"
 
 
 def test_approval_cannot_be_decided_twice():
@@ -318,7 +331,7 @@ def test_approval_cannot_be_decided_twice():
         decision=ApprovalDecisionType.APPROVE,
     )
 
-    with pytest.raises(ValueError, match="already been decided"):
+    with pytest.raises(APIError, match="already been decided") as raised:
         decide_approval(
             client=db,
             approval_id=seeded["approval_id"],
@@ -326,3 +339,55 @@ def test_approval_cannot_be_decided_twice():
             decision=ApprovalDecisionType.REJECT,
             comments="Trying to reverse the decision.",
         )
+
+    assert raised.value.code == "P0001"
+
+
+@pytest.mark.parametrize(
+    ("role", "amount", "approval_status", "bill_status", "expected"),
+    [
+        ("approver", 5000.01, "pending", "pending_approval", 403),
+        ("analyst", 250.00, "pending", "pending_approval", 403),
+        ("approver", 250.00, "approved", "approved", 409),
+    ],
+    ids=["approver over 5000", "analyst row", "already decided"],
+)
+def test_decision_route_maps_sql_errors_to_statuses(
+    role, amount, approval_status, bill_status, expected
+):
+    db = FakeSupabase()
+    seeded = seed_approval(
+        db,
+        role=role,
+        amount=amount,
+        approval_status=approval_status,
+        bill_status=bill_status,
+    )
+    app.dependency_overrides[get_current_user] = lambda: make_user(
+        str(seeded["reviewer_id"]), role=UserRole.approver
+    )
+
+    with patch("backend.api.approvals.get_admin_supabase", return_value=db):
+        response = TestClient(app).post(
+            f"/approvals/{seeded['approval_id']}/decision",
+            json={"decision": "approve"},
+        )
+
+    assert response.status_code == expected, response.text
+
+
+def test_deciding_a_missing_approval_is_404():
+    db = FakeSupabase()
+    reviewer_id = str(uuid4())
+    db.add_user(reviewer_id, role="approver", status="active")
+    app.dependency_overrides[get_current_user] = lambda: make_user(
+        reviewer_id, role=UserRole.approver
+    )
+
+    with patch("backend.api.approvals.get_admin_supabase", return_value=db):
+        response = TestClient(app).post(
+            f"/approvals/{uuid4()}/decision",
+            json={"decision": "approve"},
+        )
+
+    assert response.status_code == 404

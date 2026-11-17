@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { useAuth } from "@/auth/AuthProvider";
 import { getApprovals } from "@/lib/api/approvals";
 import { getBill } from "@/lib/api/bills";
