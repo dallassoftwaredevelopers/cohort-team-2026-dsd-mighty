@@ -15,6 +15,7 @@ from current_users import make_user
 from fake_supabase import FakeSupabase
 from fastapi.testclient import TestClient
 
+from backend.api import bill_documents
 from backend.app import app
 from backend.auth import get_current_user
 from backend.schemas.bill import BillRead
@@ -190,6 +191,58 @@ def test_owner_can_read_their_own_empty_draft(db):
 # Create (POST /bills) and Save draft share one save path.
 
 
+def test_user_cannot_read_another_users_draft(db):
+    draft = db.add_bill(USER_A)
+
+    response = as_user(USER_B).get(f"/bills/{draft['bill_id']}/draft")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Editable draft not found."
+
+
+def test_owner_can_read_their_own_draft(db):
+    draft = db.add_bill(USER_A)
+
+    response = as_user(USER_A).get(f"/bills/{draft['bill_id']}/draft")
+
+    assert response.status_code == 200
+    assert response.json()["bill_id"] == draft["bill_id"]
+    assert response.json()["status"] == "draft"
+
+
+def test_reading_a_draft_returns_what_was_saved(db):
+    # Opening a draft must fill the form with every saved field, not just its id.
+    db.add_user(USER_A)
+    saved = as_user(USER_A).post(
+        "/bills/drafts",
+        json={
+            "account_number_raw": "ACC-77",
+            "invoice_number": "INV-77",
+            "amount": "12.50",
+            "due_date": "2026-12-01",
+        },
+    )
+    assert saved.status_code == 201, saved.text
+
+    response = as_user(USER_A).get(f"/bills/{saved.json()['bill_id']}/draft")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["account_number_raw"] == "ACC-77"
+    assert body["invoice_number"] == "INV-77"
+    assert body["amount"] == "12.50"
+    assert body["due_date"] == "2026-12-01"
+
+
+def test_owner_cannot_read_their_own_non_draft(db):
+    bill = db.add_bill(USER_A, status="pending_approval")
+
+    response = as_user(USER_A).get(f"/bills/{bill['bill_id']}/draft")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Editable draft not found."
+
+
 def test_create_saves_the_bill_for_the_caller_pending_approval(db):
     db.add_user(USER_A, full_name="Ada Analyst")
 
@@ -307,10 +360,77 @@ def test_upload_rejects_a_pdf_content_type_without_pdf_bytes(db):
     assert db.storage.objects == {}
 
 
-def test_upload_to_a_bill_that_already_has_a_document_is_409(db):
-    bill = db.add_bill(USER_A, document_path="bills/x/existing.pdf")
+def test_upload_replaces_the_pdf_stored_with_a_draft(db):
+    old = "bills/x/old.pdf"
+    bill = db.add_bill(USER_A, document_path=old)
+    db.storage.objects[old] = b"%PDF-old"
 
-    assert upload(bill["bill_id"]).status_code == 409
+    response = upload(bill["bill_id"])
+
+    assert response.status_code == 201, response.text
+    new = response.json()["document_path"]
+    assert new != old
+    assert db.tables["bills"][0]["document_path"] == new
+    assert db.storage.objects == {new: PDF[1]}  # the old file is gone
+    assert db.storage.removed == [old]
+
+
+def test_a_failed_delete_of_the_replaced_pdf_still_attaches_the_new_one(db, caplog):
+    old = "bills/x/old.pdf"
+    bill = db.add_bill(USER_A, document_path=old)
+
+    with patch(
+        "backend.api.bill_documents.delete_pdf",
+        side_effect=RuntimeError("storage down"),
+    ):
+        response = upload(bill["bill_id"])
+
+    assert response.status_code == 201
+    assert db.tables["bills"][0]["document_path"] == response.json()["document_path"]
+    assert f"Orphaned invoice object requires cleanup: {old}" in caplog.text
+
+
+def test_a_pdf_replaced_during_upload_is_409_and_the_new_file_is_deleted(db):
+    bill = db.add_bill(USER_A, document_path="bills/x/old.pdf")
+    real_upload = bill_documents.upload_pdf
+
+    # Another tab replaced the PDF while this upload was in flight.
+    def upload_then_race(client, storage_path, contents):
+        real_upload(client, storage_path, contents)
+        db.tables["bills"][0]["document_path"] = "bills/x/other-tab.pdf"
+
+    with patch("backend.api.bill_documents.upload_pdf", side_effect=upload_then_race):
+        response = upload(bill["bill_id"])
+
+    assert response.status_code == 409
+    assert db.tables["bills"][0]["document_path"] == "bills/x/other-tab.pdf"
+    assert db.storage.objects == {}  # the new file is cleaned up
+    assert "bills/x/old.pdf" not in db.storage.removed  # not ours to delete
+
+
+@pytest.mark.parametrize("status", ["pending_approval", "approved"])
+def test_upload_to_a_submitted_bill_is_404_and_keeps_its_pdf(db, status):
+    bill = db.add_bill(USER_A, status=status, document_path="bills/x/sent.pdf")
+
+    assert upload(bill["bill_id"]).status_code == 404
+    assert db.tables["bills"][0]["document_path"] == "bills/x/sent.pdf"
+    assert db.storage.objects == {}
+    assert db.storage.removed == []
+
+
+def test_upload_to_a_draft_submitted_during_upload_is_409(db):
+    bill = db.add_bill(USER_A, document_path="bills/x/old.pdf")
+    real_upload = bill_documents.upload_pdf
+
+    def upload_then_submit(client, storage_path, contents):
+        real_upload(client, storage_path, contents)
+        db.tables["bills"][0]["status"] = "pending_approval"
+
+    with patch("backend.api.bill_documents.upload_pdf", side_effect=upload_then_submit):
+        response = upload(bill["bill_id"])
+
+    assert response.status_code == 409
+    assert db.tables["bills"][0]["document_path"] == "bills/x/old.pdf"
     assert db.storage.objects == {}
 
 
