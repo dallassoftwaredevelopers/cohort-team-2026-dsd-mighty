@@ -20,6 +20,8 @@ BEARER_CHALLENGE = {"WWW-Authenticate": "Bearer"}
 VENDOR_READERS = (UserRole.analyst, UserRole.approver, UserRole.admin)
 VENDOR_WRITERS = (UserRole.admin,)
 
+# Who may record a payment against an approved bill.
+PAYMENT_WRITERS = (UserRole.approver, UserRole.admin)
 # Who may read properties: everyone, e.g. to pick one for a vendor account.
 PROPERTY_READERS = (UserRole.analyst, UserRole.approver, UserRole.admin)
 # Who may add properties: admins only, as with vendors.
