@@ -1,6 +1,8 @@
+from typing import NoReturn
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from postgrest.exceptions import APIError
 
 from backend.auth import CurrentUser, require_active
 from backend.schemas.bill import (
@@ -21,7 +23,6 @@ from backend.services.bill_access import (
 )
 from backend.services.bill_repository import (
     get_editable_draft,
-    get_own_bill_status,
     get_readable_bill,
     list_dashboard_bills,
     list_readable_bills,
@@ -38,6 +39,22 @@ router = APIRouter(
     prefix="/bills",
     tags=["bills"],
 )
+
+
+def _raise_bill_rpc_error(exc: APIError, not_found_detail: str) -> NoReturn:
+    if exc.code in {"P0002", "42501"}:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=not_found_detail,
+        ) from exc
+
+    if exc.code == "P0001":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=exc.message,
+        ) from exc
+
+    raise exc
 
 
 # Submit a brand-new invoice and create its pending approval.
@@ -68,12 +85,15 @@ def resubmit_bill(
     bill: BillCreate,
     user: CurrentUser = Depends(require_active(*BILL_WRITERS)),
 ) -> BillRead:
-    return resubmit_bill_with_approval(
-        client=get_admin_supabase(),
-        bill_id=bill_id,
-        fields=bill,
-        user_id=user.id,
-    )
+    try:
+        return resubmit_bill_with_approval(
+            client=get_admin_supabase(),
+            bill_id=bill_id,
+            fields=bill,
+            user_id=user.id,
+        )
+    except APIError as exc:
+        _raise_bill_rpc_error(exc, "Bill not found.")
 
 
 @router.get("", response_model=list[BillRead])
@@ -206,35 +226,15 @@ def submit_existing_draft(
     bill: BillCreate,
     user: CurrentUser = Depends(require_active(*BILL_WRITERS)),
 ) -> BillRead:
-    client = get_admin_supabase()
-
-    submitted = submit_draft_with_approval(
-        client=client,
-        bill_id=bill_id,
-        fields=bill,
-        user_id=user.id,
-    )
-
-    if submitted is not None:
-        return submitted
-
-    existing_status = get_own_bill_status(
-        client=client,
-        bill_id=bill_id,
-        user_id=str(user.id),
-    )
-
-    if existing_status is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Editable draft not found.",
+    try:
+        return submit_draft_with_approval(
+            client=get_admin_supabase(),
+            bill_id=bill_id,
+            fields=bill,
+            user_id=user.id,
         )
-
-    # The user's bill exists, but it is no longer an editable draft.
-    raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail="This bill has already been submitted.",
-    )
+    except APIError as exc:
+        _raise_bill_rpc_error(exc, "Editable draft not found.")
 
 
 @router.get(
