@@ -106,21 +106,10 @@ jobs:
           EOF
       - name: Run pgTAP tests
         run: supabase test db
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install uv
-        uses: astral-sh/setup-uv@v9.0.0
-        with:
-          enable-cache: true
-          cache-dependency-glob: "backend/uv.lock"
-      - name: Install dependencies
-        run: uv sync --locked
       - name: Compare audit_events with the schemas (running database)
-        # 54322 and postgres:postgres are the local defaults in supabase/config.toml.
         run: |
-          DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
+          eval "$(supabase status -o env)"
+          DATABASE_URL="$DB_URL" \
             uv run pytest tests/test_audit_event_schema.py -v -rs --junitxml=audit-event-schema.xml
       - name: Fail unless every schema comparison ran
         # A skip passes pytest but tests nothing, e.g. if DATABASE_URL never reached
