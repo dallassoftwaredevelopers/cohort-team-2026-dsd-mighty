@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import pytest
 from current_users import make_user
-from fake_supabase import RPCS, FakeSupabase
+from fake_supabase import FakeSupabase
 from fastapi.testclient import TestClient
 from postgrest.exceptions import APIError
 
@@ -349,10 +349,10 @@ def test_bill_in_a_status_the_api_does_not_know_is_409(db, details):
     # function's refusal is patched in.
     bill = approved_bill(db)
 
-    def refuse(_db: FakeSupabase, _params: dict) -> None:
+    def refuse(_db: FakeSupabase, **_params: object) -> None:
         raise APIError({"code": "PT409", "message": "Not approved", "details": details})
 
-    with patch.dict(RPCS, {"record_payment": refuse}):
+    with patch.object(FakeSupabase, "_rpc_record_payment", refuse):
         response = pay(approver(db), bill, COMPLETED)
 
     assert response.status_code == 409
