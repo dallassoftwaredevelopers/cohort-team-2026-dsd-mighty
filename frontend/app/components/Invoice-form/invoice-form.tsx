@@ -39,18 +39,16 @@ import type { Bill, BillCreatePayload, BillDraftDetail, BillDraftPayload } from 
 
 type ActionStatus = "idle" | "loading" | "success" | "error";
 
-// What a Create attempt sent: the payload as JSON and the picked PDF.
-type UnansweredSubmit = { payload: string; pdf: File | null };
+type UnansweredSubmit = {
+  payload: string;
+  pdf: File | null;
+};
 
 const ALREADY_SUBMITTED_MESSAGE =
   "This bill was already sent for approval with the earlier values, so your latest changes weren't saved. Open it from the dashboard to check what was sent.";
 
-// The PDF stored with this visit's draft: none yet, one stored before this
-// visit opened the draft (the server keeps only its storage path, not its
-// name), or a file picked and stored during this visit.
 type StoredPdf = { kind: "none" } | { kind: "earlier" } | { kind: "file"; file: File };
 
-// Reading the picked PDF with POST /bills/extract.
 type ReaderState =
   | { phase: "idle" }
   | { phase: "reading" }
@@ -80,29 +78,33 @@ function ExtractionNotice({ banner }: { banner: ExtractionBanner }) {
   );
 }
 
-// What the line under the drop zone says about the bill's PDF: what is stored
-// with the draft, or that the picked file is stored on the next save or
-// Create. Null when there is nothing to say.
 function pdfStorageNote(
   stored: StoredPdf,
   picked: File | null,
 ): { tone: "stored" | "pending"; message: string } | null {
   if (picked && !(stored.kind === "file" && stored.file === picked)) {
     const action = stored.kind === "none" ? "is stored" : "replaces the stored PDF";
+
     return {
       tone: "pending",
-      message: `${picked.name} ${action} when you save the draft or create the bill.`,
+      message: `${picked.name} ${action} when you save the draft or submit the invoice.`,
     };
   }
+
   if (stored.kind === "file") {
     return {
       tone: "stored",
-      message: `Stored with this draft: ${stored.file.name}`,
+      message: `Stored with this invoice: ${stored.file.name}`,
     };
   }
+
   if (stored.kind === "earlier") {
-    return { tone: "stored", message: "A PDF is stored with this draft." };
+    return {
+      tone: "stored",
+      message: "A PDF is already stored with this invoice.",
+    };
   }
+
   return null;
 }
 
@@ -114,9 +116,7 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-// Browsers sometimes report an empty MIME type for dropped files, so the
-// extension is checked as well.
-function isPdf(file: File) {
+function isPdf(file: File): boolean {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
 
@@ -154,8 +154,6 @@ function mapBillToFormValues(bill: Bill): InvoiceFormValues {
   };
 }
 
-// Save Draft sends every field, blank ones as null, so that clearing a field
-// on an existing draft clears it in the database too.
 function draftPayload(values: InvoiceDraftFormValues): BillDraftPayload {
   return {
     account_number_raw: values.accountNumber || null,
@@ -173,7 +171,6 @@ function draftPayload(values: InvoiceDraftFormValues): BillDraftPayload {
   };
 }
 
-// The final values Create submits, from a fully validated form.
 function createPayload(values: InvoiceFormValues): BillCreatePayload {
   return {
     account_number_raw: values.accountNumber.trim(),
@@ -193,49 +190,36 @@ function createPayload(values: InvoiceFormValues): BillCreatePayload {
 
 const DRAFT_PATH = /^\/invoices\/([^/]+)\/edit\/?$/;
 
-// Where a saved draft is edited. The first Save Draft on a new invoice moves
-// the address bar here without leaving the page.
 function draftPath(draftId: string): string {
   return `/invoices/${encodeURIComponent(draftId)}/edit`;
 }
 
-// The draft a pathname opens, or null for a new invoice.
 function draftIdFromPath(pathname: string): string | null {
   const match = DRAFT_PATH.exec(pathname);
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-// The New Invoice and Edit Draft pages. Next keeps a page mounted (hidden by
-// <Activity>) after the person leaves it, so the form state outlives the
-// visit unless it is reset. Each visit gets its own InvoiceFormVisit:
-// - A link or router.push/replace into the page gives the segment a new
-//   bfcacheId, so it starts fresh. Back and forward keep the bfcacheId, so the
-//   form comes back as the person left it.
-// - The first Save Draft moves the URL with history.replaceState. Next syncs
-//   usePathname with that, but its route tree (and useParams) still say
-//   /invoices/new, so a later link to /invoices/new reuses this segment and
-//   its bfcacheId. A pathname change the form did not make is therefore a new
-//   visit too. Layout effects only run while the page is shown, so the
-//   pathnames of other pages, seen while hidden, never count.
+// Tracks visits using pathname changes instead of relying on an
+// undocumented bfcacheId property from useRouter().
 export function InvoiceForm({ isResubmission = false }: InvoiceFormProps) {
-  const { bfcacheId } = useRouter();
   const pathname = usePathname();
   const [visit, setVisit] = useState(0);
-  const shown = useRef({ bfcacheId, pathname });
-  // The URL the form itself moved to, until Next reports it back.
+  const shownPath = useRef(pathname);
   const ownPath = useRef<string | null>(null);
 
   useLayoutEffect(() => {
-    const last = shown.current;
-    shown.current = { bfcacheId, pathname };
-    // A new bfcacheId already remounted the form for the current URL.
-    if (pathname === last.pathname || bfcacheId !== last.bfcacheId) return;
+    const lastPath = shownPath.current;
+    shownPath.current = pathname;
+
+    if (pathname === lastPath) return;
+
     if (pathname === ownPath.current) {
       ownPath.current = null;
       return;
     }
+
     setVisit((current) => current + 1);
-  }, [bfcacheId, pathname]);
+  }, [pathname]);
 
   function showDraftUrl(draftId: string) {
     const path = draftPath(draftId);
@@ -245,7 +229,7 @@ export function InvoiceForm({ isResubmission = false }: InvoiceFormProps) {
 
   return (
     <InvoiceFormVisit
-      key={`${bfcacheId}:${visit}`}
+      key={visit}
       initialDraftId={draftIdFromPath(pathname)}
       isResubmission={isResubmission}
       onDraftCreated={showDraftUrl}
@@ -254,10 +238,7 @@ export function InvoiceForm({ isResubmission = false }: InvoiceFormProps) {
 }
 
 type InvoiceFormVisitProps = {
-  // The draft this visit opens, loaded from the server; null for a new
-  // invoice. Read once: a later change (the first save) does not reload.
   initialDraftId: string | null;
-  // The first Save Draft, or a Create with no draft yet, created this draft.
   onDraftCreated: (draftId: string) => void;
   isResubmission: boolean;
 };
@@ -268,36 +249,31 @@ function InvoiceFormVisit({
   onDraftCreated,
 }: InvoiceFormVisitProps) {
   const router = useRouter();
+  const params = useParams<{ invoiceId?: string }>();
+
+  const routeInvoiceId = isResubmission ? (params.invoiceId ?? null) : null;
+  const [openedId] = useState(isResubmission ? routeInvoiceId : initialDraftId);
+  const [draftId, setDraftId] = useState(initialDraftId);
+
   const [submitError, setSubmitError] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [storedPdf, setStoredPdf] = useState<StoredPdf>({ kind: "none" });
   const [fileError, setFileError] = useState("");
   const [draftMessage, setDraftMessage] = useState("");
   const [draftStatus, setDraftStatus] = useState<ActionStatus>("idle");
-  const [openedDraftId] = useState(initialDraftId);
-  const params = useParams<{ invoiceId?: string }>();
-  const routeInvoiceId = isResubmission ? (params.invoiceId ?? null) : null;
-  const [openedId] = useState(isResubmission ? routeInvoiceId : initialDraftId);
-  const [draftId, setDraftId] = useState(openedDraftId);
   const [isLoadingDraft, setIsLoadingDraft] = useState(openedId !== null);
   const [draftLoadError, setDraftLoadError] = useState<string | null>(null);
-  const draftLoaded = useRef(false);
 
   const [createStatus, setCreateStatus] = useState<ActionStatus>("idle");
-  // Create attempts whose submit got no answer (network error or lost
-  // response): each may have reached the server. A later 409 counts as done
-  // only if every one of them sent exactly what the retry sends.
   const unansweredSubmits = useRef<UnansweredSubmit[]>([]);
+
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [reader, setReader] = useState<ReaderState>({ phase: "idle" });
   const [notes, setNotes] = useState<FieldValues>({});
-  // The read in flight. Aborting it (a new file, or leaving the page) also
-  // tells readInvoice to drop its result.
   const readRef = useRef<AbortController | null>(null);
-  // The fields holding exactly what the last read filled, with that value.
-  // The next read may replace them; editing a field takes it out.
   const readerFilled = useRef(new Map<ExtractedFormField, string>());
+  const draftLoaded = useRef(false);
 
   const {
     register,
@@ -319,49 +295,49 @@ function InvoiceFormVisit({
     selectedFile !== null ||
     Object.values(watchedValues).some((value) => typeof value === "string" && value.trim() !== "");
 
-  // Save Draft and Create both may create the draft, so one waits for the
-  // other: running both at once could make two bills.
   const saving = draftStatus === "loading" || createStatus === "loading";
   const created = createStatus === "success";
   const canSaveDraft = hasAnyInput && !saving && !created;
 
-  // Saves the values to the draft, creating it on the first save, and returns
-  // its id. Throws if the save fails.
   async function saveDraftValues(payload: BillDraftPayload): Promise<string> {
     if (draftId) {
       await updateBillDraft(draftId, payload);
       return draftId;
     }
+
     const saved = await saveBillDraft(payload);
     setDraftId(saved.bill_id);
     onDraftCreated(saved.bill_id);
     return saved.bill_id;
   }
 
-  // Stores the picked PDF with draft `id`, replacing the one stored before,
-  // unless the picked file is already the stored one. Throws if it fails.
   async function storePickedPdf(id: string) {
     const file = selectedFile;
-    if (!file || (storedPdf.kind === "file" && storedPdf.file === file)) return;
+
+    if (!file || (storedPdf.kind === "file" && storedPdf.file === file)) {
+      return;
+    }
+
     await uploadInvoicePdf(file, id);
     setStoredPdf({ kind: "file", file });
   }
 
-  // Create, after the full validation passed: the bill is the draft, so its
-  // PDF goes with it. Each step is skipped once done, so a retry after a
-  // failure continues with the same draft and never makes a second bill.
   async function onSubmit(values: InvoiceFormValues) {
     setCreateStatus("loading");
     setSubmitError("");
     setDraftMessage("");
 
-    if (isResubmission) {
-      try {
-        if (!routeInvoiceId) {
-          throw new Error("Missing invoice ID. Unable to resubmit.");
-        }
+    const payload = createPayload(values);
 
-        await resubmitBill(routeInvoiceId, createPayload(values));
+    if (isResubmission) {
+      if (!routeInvoiceId) {
+        setCreateStatus("error");
+        setSubmitError("Missing invoice ID. Unable to resubmit.");
+        return;
+      }
+
+      try {
+        await resubmitBill(routeInvoiceId, payload);
       } catch (error) {
         setCreateStatus("error");
         setSubmitError(errorMessage(error, "Unable to resubmit the invoice. Please try again."));
@@ -374,6 +350,7 @@ function InvoiceFormVisit({
     }
 
     let id = draftId;
+
     try {
       id ??= await saveDraftValues(draftPayload(values));
     } catch (error) {
@@ -386,41 +363,40 @@ function InvoiceFormVisit({
       await storePickedPdf(id);
     } catch (error) {
       setCreateStatus("error");
-      // After an unanswered submit, the bill may no longer be a draft, so a
-      // newly picked PDF can't be stored on it (404 or 409). Saying "the bill
-      // wasn't created" would be wrong: it may already be with the approver.
+
       const mayBeSubmitted =
         unansweredSubmits.current.length > 0 &&
         error instanceof ApiError &&
         (error.status === 404 || error.status === 409);
+
       setSubmitError(
         mayBeSubmitted
           ? ALREADY_SUBMITTED_MESSAGE
-          : `The PDF couldn't be stored, so the bill wasn't created. Please try again.\n${errorMessage(error, "")}`.trim(),
+          : `The PDF couldn't be stored, so the bill wasn't created. Please try again. ${errorMessage(error, "")}`.trim(),
       );
       return;
     }
 
-    const payload = createPayload(values);
     const attempt: UnansweredSubmit = {
       payload: JSON.stringify(payload),
       pdf: selectedFile,
     };
+
     try {
       await submitBill(id, payload);
     } catch (error) {
-      // 409 means this draft was already submitted. That is this same Create
-      // landing only when an earlier attempt got no answer and every such
-      // attempt sent exactly these values and this PDF. Otherwise (values
-      // edited before the retry, or another tab submitted it) the bill went
-      // with other values, so say so instead of reporting success.
       const alreadySubmitted = error instanceof ApiError && error.status === 409;
       const earlier = unansweredSubmits.current;
+
       const sameAsEarlier =
         earlier.length > 0 &&
         earlier.every((sent) => sent.payload === attempt.payload && sent.pdf === attempt.pdf);
+
       if (!(alreadySubmitted && sameAsEarlier)) {
-        if (!(error instanceof ApiError)) unansweredSubmits.current = [...earlier, attempt];
+        if (!(error instanceof ApiError)) {
+          unansweredSubmits.current = [...earlier, attempt];
+        }
+
         setCreateStatus("error");
         setSubmitError(
           alreadySubmitted
@@ -435,12 +411,10 @@ function InvoiceFormVisit({
     router.push("/dashboard");
   }
 
-  // Effects run again each time the page is shown, so after back or forward
-  // the draft is not reloaded over the person's unsaved edits.
   useEffect(() => {
     if (openedId === null || draftLoaded.current) return;
-    const id = openedId;
 
+    const id = openedId;
     let cancelled = false;
 
     async function loadInvoice() {
@@ -460,6 +434,10 @@ function InvoiceFormVisit({
 
           draftLoaded.current = true;
           reset(mapBillToFormValues(bill));
+
+          if (bill.document_path) {
+            setStoredPdf({ kind: "earlier" });
+          }
         } else {
           const draft = await getBillDraft(id);
 
@@ -467,13 +445,16 @@ function InvoiceFormVisit({
 
           draftLoaded.current = true;
           reset(mapDraftToFormValues(draft));
-          if (draft.document_path) setStoredPdf({ kind: "earlier" });
+
+          if (draft.document_path) {
+            setStoredPdf({ kind: "earlier" });
+          }
         }
-      } catch (err) {
+      } catch (error) {
         if (cancelled) return;
 
         setDraftLoadError(
-          err instanceof Error ? err.message : "Unable to load the draft. Please try again.",
+          error instanceof Error ? error.message : "Unable to load the invoice. Please try again.",
         );
       } finally {
         if (!cancelled) {
@@ -489,28 +470,20 @@ function InvoiceFormVisit({
     };
   }, [openedId, isResubmission, reset]);
 
-  // Leaving the page (or unmounting) stops a read in flight. Its result would
-  // be dropped, so "Reading invoice..." must not be left showing for when the
-  // person comes back.
   useEffect(
     () => () => {
-      if (!readRef.current) return;
-      readRef.current.abort();
+      readRef.current?.abort();
       readRef.current = null;
-      setReader({ phase: "idle" });
     },
     [],
   );
 
-  // Any edit after a save means there are unsaved changes. Updaters, not the
-  // rendered draftStatus, because a read can finish long after this render.
   function markEdited() {
     setSubmitError("");
     setDraftStatus((status) => (status === "success" ? "idle" : status));
     setDraftMessage("");
   }
 
-  // Stops any read in flight and clears what the last one showed.
   function resetReader(next: ReaderState) {
     readRef.current?.abort();
     readRef.current = null;
@@ -518,10 +491,9 @@ function InvoiceFormVisit({
     setReader(next);
   }
 
-  // The fields still showing exactly what the last read filled. Checked
-  // against the current value too, so nothing the person changed counts.
   function replaceableFields(): Set<ExtractedFormField> {
     const current = getValues();
+
     return new Set(
       [...readerFilled.current]
         .filter(([name, value]) => current[name] === value)
@@ -531,31 +503,34 @@ function InvoiceFormVisit({
 
   function applyFill(values: Partial<Record<ExtractedFormField, string>>) {
     const entries = Object.entries(values) as [ExtractedFormField, string][];
+
     for (const [name, value] of entries) {
-      // Re-validate only a field already showing an error, so a filled
-      // value clears "required" without new errors appearing before Create.
       setValue(name, value, {
         shouldDirty: true,
         shouldValidate: getFieldState(name).invalid,
       });
-      if (value === "") readerFilled.current.delete(name);
-      else readerFilled.current.set(name, value);
+
+      if (value === "") {
+        readerFilled.current.delete(name);
+      } else {
+        readerFilled.current.set(name, value);
+      }
     }
+
     if (entries.length > 0) markEdited();
   }
 
-  // Pre-fills the form from the PDF. A field is set only if it is empty when
-  // the result arrives or still holds what the previous read filled, so
-  // nothing the person typed or edited (even while it was reading), and
-  // nothing loaded from a saved draft, is overwritten.
   async function readInvoice(file: File) {
     resetReader({ phase: "reading" });
+
     const controller = new AbortController();
     readRef.current = controller;
 
     let banner: ExtractionBanner;
+
     try {
       const result = await extractBill(file, controller.signal);
+
       if (controller.signal.aborted) return;
 
       const plan = planFill(result, getValues(), replaceableFields());
@@ -564,8 +539,9 @@ function InvoiceFormVisit({
       banner = plan.banner;
     } catch (error) {
       if (controller.signal.aborted) return;
-      // The previous read's values came from the previous file.
+
       applyFill(clearedValues(replaceableFields()));
+
       banner = errorBanner(error instanceof Error ? error.message : "Unable to read the invoice.");
     }
 
@@ -573,24 +549,28 @@ function InvoiceFormVisit({
     setReader({ phase: "done", banner });
   }
 
-  // Shared by the file picker and drag-and-drop. A new PDF is an unsaved
-  // change: the next Save Draft or Create stores it with the bill.
   function selectFile(file: File | null) {
     if (file && !isPdf(file)) {
       setSelectedFile(null);
       resetReader({ phase: "idle" });
       setFileError("Only PDF files can be uploaded.");
-      if (fileInputRef.current) fileInputRef.current.value = "";
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+
       return;
     }
 
     setSelectedFile(file);
     setFileError("");
+
     if (file) {
       markEdited();
       void readInvoice(file);
     } else {
       resetReader({ phase: "idle" });
+      markEdited();
     }
   }
 
@@ -601,8 +581,10 @@ function InvoiceFormVisit({
   }
 
   function handleDragLeave(event: DragEvent<HTMLLabelElement>) {
-    // dragleave also fires when moving onto a child element; ignore those.
-    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return;
+    }
+
     setIsDragging(false);
   }
 
@@ -611,21 +593,27 @@ function InvoiceFormVisit({
     setIsDragging(false);
 
     const files = event.dataTransfer.files;
+
     if (files.length > 1) {
       setSelectedFile(null);
       resetReader({ phase: "idle" });
       setFileError("Drop one PDF at a time.");
+      markEdited();
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+
       return;
     }
 
-    // The input keeps no record of dropped files; clear it so picking the
-    // same file again later still fires onChange.
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+
     selectFile(files[0] ?? null);
   }
 
-  // Saves the values, then stores the picked PDF with the draft. A PDF that
-  // fails to store leaves the draft saved; the next save retries it.
   async function handleSaveDraft() {
     if (!canSaveDraft) return;
 
@@ -634,6 +622,7 @@ function InvoiceFormVisit({
     setDraftMessage("");
 
     const validation = invoiceDraftFormSchema.safeParse(getValues());
+
     if (!validation.success) {
       setDraftStatus("error");
       setSubmitError(validation.error.issues[0]?.message ?? "Please check your draft.");
@@ -641,6 +630,7 @@ function InvoiceFormVisit({
     }
 
     let id: string;
+
     try {
       id = await saveDraftValues(draftPayload(validation.data));
     } catch (error) {
@@ -654,7 +644,7 @@ function InvoiceFormVisit({
     } catch (error) {
       setDraftStatus("error");
       setSubmitError(
-        `Draft saved, but the PDF couldn't be stored. Save again to retry.\n${errorMessage(error, "")}`.trim(),
+        `Draft saved, but the PDF couldn't be stored. Save again to retry. ${errorMessage(error, "")}`.trim(),
       );
       return;
     }
@@ -685,16 +675,19 @@ function InvoiceFormVisit({
     <form
       onSubmit={handleSubmit(onSubmit)}
       onChange={(event) => {
-        // Editing a field after a save means there are unsaved changes.
-        // Choosing a PDF is not a draft edit, so the file input is ignored.
         const target = event.target;
-        if (target instanceof HTMLInputElement && target.type === "file") return;
+
+        if (target instanceof HTMLInputElement && target.type === "file") {
+          return;
+        }
+
         markEdited();
-        // Editing a field marked "Check this" settles it, and makes its
-        // value the person's: no later read replaces it.
+
         const name = "name" in target ? target.name : null;
+
         if (typeof name === "string") {
           readerFilled.current.delete(name as ExtractedFormField);
+
           setNotes((current) =>
             name in current
               ? Object.fromEntries(Object.entries(current).filter(([field]) => field !== name))
@@ -713,6 +706,7 @@ function InvoiceFormVisit({
           {submitError}
         </p>
       )}
+
       {draftMessage && (
         <p
           role="status"
@@ -721,6 +715,7 @@ function InvoiceFormVisit({
           {draftMessage}
         </p>
       )}
+
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-3xl font-semibold tracking-tight text-foreground">
           {isResubmission ? "Resubmit Rejected Invoice" : draftId ? "Edit Draft" : "New Invoice"}
@@ -743,6 +738,7 @@ function InvoiceFormVisit({
               disabled={!canSaveDraft}
             />
           )}
+
           <Button
             label="Cancel"
             variant="secondary"
@@ -759,7 +755,9 @@ function InvoiceFormVisit({
         >
           <div className="flex items-center justify-center gap-2 text-sm text-foreground-muted">
             <FileCheck aria-hidden="true" className="h-5 w-5 shrink-0" />
-            <p>The existing invoice PDF will be retained when you resubmit this bill.</p>
+            {storedPdf.kind !== "none"
+              ? "The existing invoice PDF will be retained when you resubmit this invoice."
+              : "No invoice PDF is currently stored with this invoice."}
           </div>
         </section>
       ) : (
@@ -776,11 +774,19 @@ function InvoiceFormVisit({
             <FileUp className="mx-auto h-6 w-6 text-foreground-muted" />
 
             <span className="mt-2 block text-sm font-medium">
-              {isDragging ? "Drop the PDF here" : "Upload / import invoice (PDF)"}
+              {isDragging
+                ? "Drop the PDF here"
+                : isResubmission
+                  ? "Replace invoice PDF (optional)"
+                  : "Upload / import invoice (PDF)"}
             </span>
 
             <span className="mt-1 block text-sm text-foreground-muted">
-              {selectedFile ? selectedFile.name : "Drag and drop a PDF here, or click to browse"}
+              {selectedFile
+                ? selectedFile.name
+                : storedPdf.kind !== "none"
+                  ? "A PDF is already stored. Select a new PDF to replace it."
+                  : "Drag and drop a PDF here, or click to browse"}
             </span>
 
             <input

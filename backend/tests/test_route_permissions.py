@@ -25,45 +25,50 @@ from backend.extraction.schema import ExtractionResult, ExtractionStatus
 from backend.schemas.user import UserRole
 
 ANALYST, APPROVER, ADMIN = UserRole.analyst, UserRole.approver, UserRole.admin
+
 PDF = ("invoice.pdf", b"%PDF-1.4\nsample", "application/pdf")
+
 
 # (method, path, roles allowed when active, status code when allowed)
 ROLE_TABLE = [
+    # Bills
     ("POST", "/bills", {ANALYST, ADMIN}, 201),
     ("GET", "/bills", {ANALYST, APPROVER, ADMIN}, 200),
     ("GET", "/bills/{bill_id}", {ANALYST, APPROVER, ADMIN}, 200),
     ("GET", "/bills/dashboard", {ANALYST, APPROVER, ADMIN}, 200),
+    # Drafts
     ("POST", "/bills/drafts", {ANALYST, ADMIN}, 201),
     ("GET", "/bills/{bill_id}/draft", {ANALYST, ADMIN}, 200),
     ("PATCH", "/bills/{bill_id}/draft", {ANALYST, ADMIN}, 200),
+    # Bill documents
     ("GET", "/bills/{bill_id}/document", {ANALYST, APPROVER, ADMIN}, 200),
     ("POST", "/bills/{bill_id}/document", {ANALYST, ADMIN}, 201),
+    # Bill submission and extraction
     ("POST", "/bills/{bill_id}/submit", {ANALYST, ADMIN}, 200),
     ("POST", "/bills/extract", {ANALYST, ADMIN}, 200),
+    ("POST", "/bills/{bill_id}/resubmit", {ANALYST, ADMIN}, 200),
+    # Vendors
     ("GET", "/vendors", {ANALYST, APPROVER, ADMIN}, 200),
     ("POST", "/vendors", {ADMIN}, 201),
     ("GET", "/vendors/{vendor_id}", {ANALYST, APPROVER, ADMIN}, 200),
     ("PATCH", "/vendors/{vendor_id}", {ADMIN}, 200),
+    # Vendor accounts
+    ("POST", "/vendor-accounts", {ADMIN}, 201),
+    ("GET", "/vendor-accounts/{account_id}", {ANALYST, APPROVER, ADMIN}, 200),
+    ("PATCH", "/vendor-accounts/{account_id}", {ADMIN}, 200),
+    # Approvals
+    ("GET", "/approvals", {APPROVER, ADMIN}, 200),
+    ("POST", "/approvals/{approval_id}/decision", {APPROVER, ADMIN}, 200),
+    # Admin users
     ("GET", "/admin/users", {ADMIN}, 200),
-    (
-        "GET",
-        "/approvals",
-        {APPROVER, ADMIN},
-        200,
-    ),
-    (
-        "POST",
-        "/approvals/{approval_id}/decision",
-        {APPROVER, ADMIN},
-        200,
-    ),
-    ("POST", "/bills/{bill_id}/resubmit", {ANALYST, ADMIN}, 200),
     ("GET", "/admin/users/{user_id}", {ADMIN}, 200),
     ("PATCH", "/admin/users/{user_id}", {ADMIN}, 200),
 ]
 
+
 # Routes that need a signed-in user but no role.
 ANY_SIGNED_IN = {("GET", "/me")}
+
 
 NEW_BILL = {
     "account_number_raw": "ACC-1",
@@ -72,6 +77,7 @@ NEW_BILL = {
     "due_date": "2026-12-01",
     "amount": "10.00",
 }
+
 
 REQUEST_BODY = {
     ("POST", "/bills"): {"json": NEW_BILL},
@@ -82,7 +88,6 @@ REQUEST_BODY = {
     ("POST", "/bills/extract"): {"files": {"file": PDF}},
     ("POST", "/vendors"): {"json": {"name": "Acme Water"}},
     ("PATCH", "/vendors/{vendor_id}"): {"json": {"contact_phone": "555-0100"}},
-    ("PATCH", "/admin/users/{user_id}"): {"json": {"role": "approver"}},
     ("POST", "/approvals/{approval_id}/decision"): {
         "json": {
             "decision": "approve",
@@ -97,7 +102,9 @@ REQUEST_BODY = {
             "amount": "10.00",
         }
     },
+    ("PATCH", "/admin/users/{user_id}"): {"json": {"role": "approver"}},
 }
+
 
 CASES = [
     pytest.param(
@@ -109,7 +116,9 @@ CASES = [
         id=f"{method} {path} {role} {status}",
     )
     for (method, path, allowed, expected), role, status in product(
-        ROLE_TABLE, UserRole, ("active", "inactive")
+        ROLE_TABLE,
+        UserRole,
+        ("active", "inactive"),
     )
 ]
 
@@ -132,10 +141,15 @@ def db():
 
 
 @pytest.fixture
-def no_model_call():
-    # POST /bills/extract reads the file with a stand-in, never a model.
+def no_model_call(monkeypatch):
+    """Replace the extraction dependency without making a model call."""
     result = ExtractionResult(status=ExtractionStatus.ready_for_review)
-    app.dependency_overrides[get_bill_extractor] = lambda: lambda data, media: result
+
+    monkeypatch.setitem(
+        app.dependency_overrides,
+        get_bill_extractor,
+        lambda: lambda data, media: result,
+    )
 
 
 @pytest.mark.parametrize(
@@ -143,7 +157,14 @@ def no_model_call():
     CASES,
 )
 def test_route_allows_only_its_active_roles(
-    db, no_model_call, monkeypatch, method, path, role, status, expected
+    db,
+    no_model_call,
+    monkeypatch,
+    method,
+    path,
+    role,
+    status,
+    expected,
 ):
     user = make_user(role=role, status=status)
 
@@ -159,6 +180,7 @@ def test_route_allows_only_its_active_roles(
         else None
     )
 
+    # Seed the bill in the state required by the route being tested.
     if path == "/bills/{bill_id}/resubmit":
         bill_status = "rejected"
     elif path in {
@@ -180,6 +202,7 @@ def test_route_allows_only_its_active_roles(
     if path != "/bills/{bill_id}/submit":
         approval = db.add_approval(bill["bill_id"])
 
+    # Resubmission must start with a rejected approval record.
     if path == "/bills/{bill_id}/resubmit":
         approval["approval_status"] = "rejected"
 
@@ -222,26 +245,23 @@ def test_route_allows_only_its_active_roles(
         assert response.json()["detail"] == "Your role can't do this."
 
 
-# Routes open on purpose: no sign-in at all. Each group says why and which
-# ticket closes it. A route here must never use the admin Supabase client.
+# Routes open on purpose: no sign-in at all.
+# A route here must never use the admin Supabase client.
 OPEN_ROUTES = {
     # Health check; stays open.
     ("GET", "/"),
-    # Health check for Render and the team; publishable client only, so RLS
-    # applies (test_health.py checks it never uses the admin client).
+    # Health check for Render and the team.
+    # Uses the publishable client, so RLS applies.
+    # test_health.py checks that it never uses the admin client.
     ("GET", "/health"),
-    # In-memory stubs; DC-43 (approve and reject actions) adds the role check.
-    # In-memory stubs, no Supabase; must get a role-table row before they touch
-    # Supabase.
-    ("POST", "/vendor-accounts"),
-    ("GET", "/vendor-accounts/{account_id}"),
-    ("PATCH", "/vendor-accounts/{account_id}"),
 }
 
 
 def operations() -> dict[tuple[str, str], bool]:
-    """(method, path) -> whether the route reads the bearer token, which the
-    OpenAPI schema shows as a security scheme."""
+    """(method, path) -> whether the route reads the bearer token.
+
+    The OpenAPI schema exposes this through its security scheme.
+    """
     return {
         (method.upper(), path): bool(operation.get("security"))
         for path, ops in app.openapi()["paths"].items()
@@ -254,17 +274,21 @@ def test_every_signed_in_route_is_in_the_role_table():
     guarded = {route for route, signed_in in operations().items() if signed_in}
 
     table = {(method, path) for method, path, _, _ in ROLE_TABLE}
+
     assert guarded == table | ANY_SIGNED_IN
 
 
 def test_every_route_needs_sign_in_or_is_open_on_purpose():
-    # The test above cannot see a new route with no auth at all; this one can.
+    # The first test cannot see a new route with no auth at all.
+    # This test catches those routes.
     unguarded = {route for route, signed_in in operations().items() if not signed_in}
 
     assert unguarded == OPEN_ROUTES, (
-        f"Open but not in OPEN_ROUTES: {sorted(unguarded - OPEN_ROUTES)}. "
-        "Add require_active(...) and a ROLE_TABLE row, or add the route to "
-        "OPEN_ROUTES with a reason. "
-        f"In OPEN_ROUTES but signed in now: {sorted(OPEN_ROUTES - unguarded)}. "
+        f"Open but not in OPEN_ROUTES: "
+        f"{sorted(unguarded - OPEN_ROUTES)}. "
+        "Add require_active(...) and a ROLE_TABLE row, or add the route "
+        "to OPEN_ROUTES with a reason. "
+        f"In OPEN_ROUTES but signed in now: "
+        f"{sorted(OPEN_ROUTES - unguarded)}. "
         "Remove them from OPEN_ROUTES."
     )
