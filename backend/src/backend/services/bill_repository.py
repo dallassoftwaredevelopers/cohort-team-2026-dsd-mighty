@@ -52,7 +52,7 @@ class DuplicateInvoice(Exception):
 
 
 def _write(query: Any) -> Any:
-    """Run an insert or update on `bills`, raising DuplicateInvoice for the
+    """Run an insert, update or bill RPC, raising DuplicateInvoice for the
     one unique index a write can break."""
     try:
         return query.execute()
@@ -60,6 +60,17 @@ def _write(query: Any) -> Any:
         if error.code == UNIQUE_VIOLATION:
             raise DuplicateInvoice from error
         raise
+
+
+def _check_pick(client: Client, fields: BillCreate) -> None:
+    """Raise UnusableVendorAccount before an RPC if the picked account
+    does not exist or is not active."""
+    if fields.vendor_account_id is not None:
+        match_columns(
+            client,
+            fields.account_number_raw,
+            fields.vendor_account_id,
+        )
 
 
 # ---------------------------------------------------------
@@ -139,9 +150,11 @@ def save_bill(
 
     payload["submitted_by"] = str(user_id)
     payload["status"] = status.value
-    payload |= match_columns( 
-    client, fields.account_number_raw, fields.vendor_account_id
-)
+    payload |= match_columns(
+        client,
+        fields.account_number_raw,
+        fields.vendor_account_id,
+    )
 
     response = _write(
         client.table("bills").insert(payload).select(BILL_COLUMNS).single()
@@ -161,15 +174,19 @@ def submit_bill_with_approval(
     user_id: UUID,
 ) -> BillRead:
     """Create a brand-new invoice and its pending approval transactionally."""
+    _check_pick(client, fields)
+
     payload = fields.model_dump(mode="json")
 
-    response = client.rpc(
-        "create_bill_with_approval",
-        {
-            "p_fields": payload,
-            "p_user_id": str(user_id),
-        },
-    ).execute()
+    response = _write(
+        client.rpc(
+            "create_bill_with_approval",
+            {
+                "p_fields": payload,
+                "p_user_id": str(user_id),
+            },
+        )
+    )
 
     if response.data is None:
         raise RuntimeError("Bill submission did not return a bill ID.")
@@ -196,16 +213,20 @@ def resubmit_bill_with_approval(
     its document_path and rejected approval history, and creates
     a new pending approval record.
     """
+    _check_pick(client, fields)
+
     payload = fields.model_dump(mode="json")
 
-    response = client.rpc(
-        "resubmit_bill_with_approval",
-        {
-            "p_bill_id": str(bill_id),
-            "p_fields": payload,
-            "p_user_id": str(user_id),
-        },
-    ).execute()
+    response = _write(
+        client.rpc(
+            "resubmit_bill_with_approval",
+            {
+                "p_bill_id": str(bill_id),
+                "p_fields": payload,
+                "p_user_id": str(user_id),
+            },
+        )
+    )
 
     if response.data is None:
         raise RuntimeError("Bill resubmission did not return a bill ID.")
@@ -378,7 +399,13 @@ def update_draft(
 ) -> dict | None:
     """Update the caller's own draft.
 
-    Explicit nulls clear fields. Unspecified fields remain unchanged.
+    `exclude_unset` keeps explicit nulls, so a field cleared in the form is
+    cleared in the database, while fields the client did not send are left
+    untouched. The match is worked out again when the request sends the
+    account number or the vendor account, and on every save of a draft whose
+    stored match was not picked, so an account added or changed since is
+    taken into account. A picked account stays until the request changes the
+    number or the pick.
     """
     payload = draft.model_dump(
         mode="json",
@@ -390,10 +417,13 @@ def update_draft(
 
     if "account_number_raw" in sent:
         payload |= match_columns(
-            client, draft.account_number_raw, draft.vendor_account_id
+            client,
+            draft.account_number_raw,
+            draft.vendor_account_id,
         )
     else:
         stored = get_editable_draft(client, bill_id, user_id)
+
         if stored is None:
             return None
 
@@ -404,42 +434,6 @@ def update_draft(
                 draft.vendor_account_id,
             )
 
-        if not payload:
-            return stored
-
-    response = _write(
-        _editable(
-            client.table("bills").update(payload).eq("bill_id", str(bill_id)),
-            user_id,
-        ).select(DRAFT_COLUMNS)
-    )
-
-    rows = response.data or []
-
-    return rows[0] if len(rows) == 1 else None
-    `exclude_unset` keeps explicit nulls, so a field cleared in the form is
-    cleared in the database, while fields the client did not send are left
-    untouched. The match is worked out again when the request sends the
-    account number or the vendor account, and on every save of a draft whose
-    stored match was not picked, so an account added or changed since is
-    taken into account. A picked account stays until the request changes the
-    number or the pick.
-    """
-    payload = draft.model_dump(mode="json", exclude_unset=True, exclude=MATCH_FIELDS)
-    sent = draft.model_fields_set
-
-    if "account_number_raw" in sent:
-        payload |= match_columns(
-            client, draft.account_number_raw, draft.vendor_account_id
-        )
-    else:
-        stored = get_editable_draft(client, bill_id, user_id)
-        if stored is None:
-            return None
-        if "vendor_account_id" in sent or not stored["vendor_account_picked"]:
-            payload |= match_columns(
-                client, stored.get("account_number_raw"), draft.vendor_account_id
-            )
         if not payload:
             return stored
 
@@ -478,16 +472,20 @@ def submit_draft_with_approval(
     - Insert one pending approval record.
     - Return the existing bill UUID.
     """
+    _check_pick(client, fields)
+
     payload = fields.model_dump(mode="json")
 
-    response = client.rpc(
-        "submit_draft_bill_with_approval",
-        {
-            "p_bill_id": str(bill_id),
-            "p_fields": payload,
-            "p_user_id": str(user_id),
-        },
-    ).execute()
+    response = _write(
+        client.rpc(
+            "submit_draft_bill_with_approval",
+            {
+                "p_bill_id": str(bill_id),
+                "p_fields": payload,
+                "p_user_id": str(user_id),
+            },
+        )
+    )
 
     if response.data is None:
         raise RuntimeError("Draft submission did not return a bill ID.")

@@ -27,6 +27,8 @@ from uuid import uuid4
 
 from postgrest.exceptions import APIError
 
+from backend.services.vendor_account_matching import same_account_number
+
 # (table, column) -> (referenced table, referenced column)
 FOREIGN_KEYS = {
     ("bills", "submitted_by"): ("app_users", "user_id"),
@@ -490,6 +492,7 @@ APPROVAL_BILL_FIELDS = (
     "property_address",
     "account_status",
     "website_name",
+    "vendor_account_id",
 )
 
 
@@ -531,7 +534,8 @@ class FakeSupabase:
         """Undo every row and Vault change if the body raises.
 
         Rows are restored in place, so a test holding a row dict sees the
-        rolled-back values.
+        rolled-back values. A table first touched inside the transaction is
+        left in place, empty.
         """
         saved_rows = {
             name: [(row, dict(row)) for row in rows]
@@ -542,11 +546,6 @@ class FakeSupabase:
         try:
             yield
         except BaseException:
-            # Remove tables created during the failed transaction.
-            for name in list(self.tables):
-                if name not in saved_rows:
-                    del self.tables[name]
-
             for name, rows in self.tables.items():
                 saved = saved_rows.get(name, [])
 
@@ -734,6 +733,65 @@ class FakeSupabase:
         for field, value in fields.items():
             bill[field] = value
 
+    def _apply_vendor_match(
+        self,
+        bill: dict[str, Any],
+        pick: str | None,
+    ) -> None:
+        """Python twin of the vendor-account match in the bill RPCs.
+
+        The number rule is the real one, imported from
+        vendor_account_matching, so the fake cannot drift from it.
+        """
+        account: dict[str, Any] | None = None
+        picked = False
+
+        if pick is not None:
+            account = self.find("vendor_accounts", "account_id", str(pick))
+
+            if account is None:
+                raise _invalid("Vendor account not found.")
+
+            if account.get("status") != "active":
+                raise _invalid("This vendor account is inactive.")
+
+            picked = True
+        else:
+            active = [
+                candidate
+                for candidate in self.tables.get("vendor_accounts", [])
+                if candidate.get("status") == "active"
+            ]
+            matches = same_account_number(active, bill.get("account_number_raw"))
+
+            if len(matches) == 1:
+                account = matches[0]
+
+        bill["vendor_account_id"] = account["account_id"] if account else None
+        bill["vendor_id"] = account["vendor_id"] if account else None
+        bill["property_id"] = account["property_id"] if account else None
+        bill["vendor_account_picked"] = picked
+
+        self._check_invoice_unique(bill)
+
+    def _check_invoice_unique(self, bill: dict[str, Any]) -> None:
+        # bills_account_invoice_unique
+        key = _bill_invoice_key(bill)
+
+        if key is None:
+            return
+
+        for other in self.tables.get("bills", []):
+            if other is not bill and _bill_invoice_key(other) == key:
+                raise APIError(
+                    {
+                        "code": "23505",
+                        "message": (
+                            "duplicate key on bills (bills_account_invoice_unique)"
+                        ),
+                    }
+                )
+
     def _rpc_create_bill_with_approval(
         self,
         p_fields: dict[str, Any],
@@ -749,6 +807,8 @@ class FakeSupabase:
             status="pending_approval",
             **p_fields,
         )
+
+        self._apply_vendor_match(bill, p_fields.get("vendor_account_id"))
 
         self.add_approval(bill_id=bill["bill_id"])
         return bill["bill_id"]
@@ -775,6 +835,7 @@ class FakeSupabase:
 
         self._ensure_no_pending_approval(p_bill_id)
         self._apply_approval_bill_fields(bill, p_fields)
+        self._apply_vendor_match(bill, p_fields.get("vendor_account_id"))
 
         now = datetime.now(UTC).isoformat()
         bill["status"] = "pending_approval"
@@ -812,6 +873,7 @@ class FakeSupabase:
 
         self._ensure_no_pending_approval(p_bill_id)
         self._apply_approval_bill_fields(bill, p_fields)
+        self._apply_vendor_match(bill, p_fields.get("vendor_account_id"))
 
         now = datetime.now(UTC).isoformat()
         bill["status"] = "pending_approval"

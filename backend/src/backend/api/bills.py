@@ -1,4 +1,3 @@
-
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import NoReturn
@@ -91,6 +90,7 @@ def _raise_bill_rpc_error(exc: APIError, not_found_detail: str) -> NoReturn:
     response_model=BillRead,
     status_code=status.HTTP_201_CREATED,
 )
+@bill_write_errors()
 def create_bill(
     bill: BillCreate,
     user: CurrentUser = Depends(require_active(*BILL_WRITERS)),
@@ -108,6 +108,7 @@ def create_bill(
     "/{bill_id}/resubmit",
     response_model=BillRead,
 )
+@bill_write_errors()
 def resubmit_bill(
     bill_id: UUID,
     bill: BillCreate,
