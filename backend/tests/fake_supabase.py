@@ -5,13 +5,15 @@ real repository queries. This matters because the routes use a service-role
 client, which bypasses row-level security: bill_access filters are the
 authorization boundary for bill reads and writes.
 
-select() resolves supported embeds through FOREIGN_KEYS. Inserts and updates
-enforce the foreign-key and unique constraints represented below, raising
-PostgREST-style APIErrors with PostgreSQL error codes.
+select() resolves embeds such as submitter:app_users!submitted_by(...)
+through FOREIGN_KEYS. Inserts and updates must satisfy FOREIGN_KEYS and
+UNIQUE_KEYS; a violation raises the APIError PostgREST sends, with the
+Postgres error code, so the repositories' error handling runs in tests.
 
-rpc() runs Python twins of the SQL functions used by the repositories.
-Each RPC is transactional: if it raises, table rows and Vault secrets are
-restored.
+rpc() runs Python twins of the SQL functions the repositories call, with
+Vault as a dict of plaintext secrets. Each call is one transaction, as through
+PostgREST: if the twin raises, every table row and Vault secret it changed is
+put back.
 
 Supports only the query shapes the repositories use. Helpers, not tests.
 """
@@ -49,6 +51,7 @@ def _columns_key(*columns: str) -> Callable[[dict[str, Any]], tuple | None]:
 def _bill_invoice_key(row: dict[str, Any]) -> tuple | None:
     # bills_account_invoice_unique:
     # (vendor_account_id, lower(btrim(invoice_number)))
+    # where vendor_account_id is not null.
     account = row.get("vendor_account_id")
     invoice = row.get("invoice_number")
 
@@ -89,11 +92,13 @@ def _sql_error(message: str, code: str) -> APIError:
 class _Result:
     def __init__(self, data: Any, count: int | None = None) -> None:
         self.data = data
+        # Set only when the query asked for count="exact", as in supabase-py.
         self.count = count
 
 
 def _like_regex(pattern: str) -> re.Pattern[str]:
-    """Convert a PostgreSQL LIKE pattern into a case-insensitive regex."""
+    """A Postgres LIKE pattern as a regex: `%` and PostgREST's `*` match any
+    run, `_` one character, and a backslash escapes the next character."""
     parts = []
     characters = iter(pattern)
 
@@ -163,13 +168,13 @@ class _Query:
         self._filters: list[tuple[str, Any]] = []
         self._any_of: list[list[tuple[str, str, str]]] = []
         self._embeds: list[tuple[str, str, str, list[str]]] = []
-        self._columns: list[str] | None = None
+        self._columns: list[str] | None = None  # None: every column
         self._order: list[tuple[str, bool]] = []
         self._limit: int | None = None
         self._offset = 0
         self._count = False
         self._likes: list[tuple[str, re.Pattern[str]]] = []
-        self._single: str | None = None
+        self._single: str | None = None  # "maybe" or "one"
         self._neq_filters: list[tuple[str, Any]] = []
 
     def select(
@@ -177,6 +182,7 @@ class _Query:
         *columns: str,
         count: str | None = None,
     ) -> "_Query":
+        """Select columns, including supported foreign-key embeds."""
         joined = ",".join(columns)
 
         for alias, table, fk_column, inner in EMBED.findall(joined):
@@ -234,6 +240,7 @@ class _Query:
         return self
 
     def range(self, start: int, end: int) -> "_Query":
+        # supabase-py sends offset and limit, as here.
         self._offset = start
         self._limit = end - start + 1
         return self
@@ -310,7 +317,7 @@ class _Query:
                     raise APIError(
                         {
                             "code": "23503",
-                            "message": (f"{table}.{column} violates foreign key"),
+                            "message": f"{table}.{column} violates foreign key",
                         }
                     )
 
@@ -321,7 +328,7 @@ class _Query:
                 raise APIError(
                     {
                         "code": "23505",
-                        "message": (f"duplicate key on {self._table} {key}"),
+                        "message": f"duplicate key on {self._table} {key}",
                     }
                 )
 
@@ -339,12 +346,9 @@ class _Query:
             rows = [row for row in self._rows if self._matches(row)]
 
             if self._op == "update":
-                # Validate all updated rows before changing any of them.
+                # Check every row first: a failed statement changes nothing.
                 for row in rows:
-                    updated = {
-                        **row,
-                        **(self._payload or {}),
-                    }
+                    updated = {**row, **(self._payload or {})}
                     others = [other for other in self._rows if other is not row]
                     self._check_constraints(updated, others)
 
@@ -363,6 +367,7 @@ class _Query:
                 )
 
             if self._count and self._offset > len(rows):
+                # PostgREST answers 416 when a counted page starts past the end.
                 raise APIError(
                     {
                         "code": "PGRST103",
@@ -455,7 +460,7 @@ class _Rpc:
             return _Result(function(**self._params))
 
 
-# Vendor-account SQL function allow-lists.
+# Columns the account functions accept, as in the SQL functions' allow-lists.
 ACCOUNT_UPDATE_FIELDS = (
     "account_number",
     "account_type",
@@ -506,8 +511,9 @@ class FakeSupabase:
     def __init__(self) -> None:
         self.tables: dict[str, list[dict[str, Any]]] = {}
         self.storage = _Storage()
-        # Secret ID -> plaintext. The real Vault stores ciphertext.
+        # Vault: secret id -> plaintext. The real one stores ciphertext.
         self.vault: dict[str, str] = {}
+        # Vault writes raise, as when Vault is unavailable mid-transaction.
         self.fail_vault_writes = False
 
     def table(self, name: str) -> _Query:
@@ -522,7 +528,11 @@ class FakeSupabase:
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
-        """Restore table rows and Vault secrets if an RPC fails."""
+        """Undo every row and Vault change if the body raises.
+
+        Rows are restored in place, so a test holding a row dict sees the
+        rolled-back values.
+        """
         saved_rows = {
             name: [(row, dict(row)) for row in rows]
             for name, rows in self.tables.items()
@@ -596,40 +606,6 @@ class FakeSupabase:
         self.table("app_users")._rows.append(row)
         return row
 
-    def add_bill(
-        self,
-        submitted_by: str,
-        **fields: Any,
-    ) -> dict[str, Any]:
-        if not self.find("app_users", "user_id", submitted_by):
-            self.add_user(submitted_by)
-
-        row = {
-            "bill_id": str(uuid4()),
-            "submitted_by": submitted_by,
-            "status": "draft",
-            "document_path": None,
-            "vendor_account_picked": False,
-            "created_at": datetime.now(UTC).isoformat(),
-            **fields,
-        }
-        self.tables.setdefault("bills", []).append(row)
-        return row
-
-    def add_approval(
-        self,
-        bill_id: str,
-        **fields: Any,
-    ) -> dict[str, Any]:
-
-        row = {
-            **_insert_defaults("approvals"),
-            "bill_id": bill_id,
-            **fields,
-        }
-        self.tables.setdefault("approvals", []).append(row)
-        return row
-
     def add_vendor(
         self,
         vendor_name: str,
@@ -671,6 +647,8 @@ class FakeSupabase:
         vendor_id: str,
         **fields: Any,
     ) -> dict[str, Any]:
+        """An account row; set its password through the `update_vendor_account`
+        rpc, as the repository does."""
         row = {
             **_insert_defaults("vendor_accounts"),
             "property_id": property_id,
@@ -681,6 +659,41 @@ class FakeSupabase:
             **fields,
         }
         self.table("vendor_accounts")._rows.append(row)
+        return row
+
+    def add_bill(
+        self,
+        submitted_by: str,
+        **fields: Any,
+    ) -> dict[str, Any]:
+        """Add a bill row and ensure its submitter exists."""
+        if not self.find("app_users", "user_id", submitted_by):
+            self.add_user(submitted_by)
+
+        row = {
+            "bill_id": str(uuid4()),
+            "submitted_by": submitted_by,
+            "status": "draft",
+            "document_path": None,
+            "vendor_account_picked": False,
+            "created_at": datetime.now(UTC).isoformat(),
+            **fields,
+        }
+        self.tables.setdefault("bills", []).append(row)
+        return row
+
+    def add_approval(
+        self,
+        bill_id: str,
+        **fields: Any,
+    ) -> dict[str, Any]:
+        """Add an approval record for an existing bill."""
+        row = {
+            **_insert_defaults("approvals"),
+            "bill_id": bill_id,
+            **fields,
+        }
+        self.tables.setdefault("approvals", []).append(row)
         return row
 
     # ------------------------------------------------------------------
@@ -926,6 +939,10 @@ class FakeSupabase:
 
     # ------------------------------------------------------------------
     # Vendor-account and Vault RPC twins
+    #
+    # Python twins of the SQL functions in
+    # 20261115100000_vendor_portal_login.sql. Keep them in step: same checks,
+    # same order, same error codes.
     # ------------------------------------------------------------------
 
     def _locked_account(self, account_id: str) -> dict[str, Any]:
@@ -939,7 +956,7 @@ class FakeSupabase:
             raise APIError(
                 {
                     "code": "P0002",
-                    "message": (f"vendor account {account_id} not found"),
+                    "message": f"vendor account {account_id} not found",
                 }
             )
 
@@ -960,6 +977,8 @@ class FakeSupabase:
 
         self.vault[secret_id] = password
 
+    # set_vendor_account_portal_password: a building block, not callable by
+    # the service role, so not an `_rpc_` twin.
     def _set_portal_password(
         self,
         account_id: str,
@@ -978,11 +997,13 @@ class FakeSupabase:
         else:
             self._write_vault(secret_id, password)
 
+    # clear_vendor_account_portal_password: a building block too.
     def _clear_portal_password(self, account_id: str) -> None:
         account = self._locked_account(account_id)
         secret_id = account["portal_password_secret_id"]
 
         if secret_id is not None:
+            # Deleting the secret nulls the id (on delete set null).
             self.vault.pop(secret_id, None)
             account["portal_password_secret_id"] = None
 
@@ -999,6 +1020,7 @@ class FakeSupabase:
             ACCOUNT_CREATE_FIELDS,
         )
 
+        # A missing key reads as null, as `->>` does.
         values = {field: p_account.get(field) for field in ACCOUNT_CREATE_FIELDS}
 
         created = self.table("vendor_accounts").insert(values).execute()
@@ -1032,14 +1054,7 @@ class FakeSupabase:
             ACCOUNT_UPDATE_FIELDS,
         )
 
-        if (
-            self.find(
-                "vendor_accounts",
-                "account_id",
-                p_account_id,
-            )
-            is None
-        ):
+        if self.find("vendor_accounts", "account_id", p_account_id) is None:
             return []
 
         if p_changes:
@@ -1079,6 +1094,6 @@ class FakeSupabase:
             {
                 "portal_url": account["portal_url"],
                 "portal_login_email": account["portal_login_email"],
-                "portal_password": (self.vault.get(secret_id) if secret_id else None),
+                "portal_password": self.vault.get(secret_id) if secret_id else None,
             }
         ]
